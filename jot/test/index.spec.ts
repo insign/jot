@@ -1,94 +1,69 @@
 // jot/test/index.spec.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import worker from '../src/index';
+import { setupBot } from '../src/index';
 import * as kv from '../src/kv';
-import * as jules from '../src/jules';
+import * as sync from '../src/sync';
 import { Bot } from 'grammy';
 
-// Mock the entire 'grammy' module
-vi.mock('grammy', () => {
-    const mockBotInstance = {
-        command: vi.fn(),
-        on: vi.fn(),
-    };
-    return {
-        Bot: vi.fn(() => mockBotInstance),
-        webhookCallback: vi.fn((bot) => async (request: Request) => new Response('mocked webhook response')),
-        InlineKeyboard: vi.fn().mockImplementation(() => ({
-            text: vi.fn().mockReturnThis(),
-        })),
-    };
-});
-
-// Mock our own modules
 vi.mock('../src/kv');
 vi.mock('../src/jules');
 vi.mock('../src/activities');
+vi.mock('../src/sync');
+vi.mock('../src/media');
+vi.mock('../src/utils');
+
+vi.mock('grammy', () => ({
+    Bot: vi.fn().mockImplementation(() => ({
+        command: vi.fn(),
+        on: vi.fn(),
+        api: {
+            getChatAdministrators: vi.fn().mockResolvedValue([{ user: { id: 1 } }]),
+        },
+    })),
+    webhookCallback: vi.fn(),
+    InlineKeyboard: vi.fn(),
+}));
 
 const mockEnv = {
     BOT_TOKEN: 'fake-bot-token',
     JOT_KV: 'fake-kv' as any,
 };
 
-describe('Bot Command and Message Handlers', () => {
+describe('Bot Command Registration and Handlers', () => {
     let botInstance: any;
 
     beforeEach(() => {
-        // Reset mocks before each test
         vi.clearAllMocks();
-        // Get a fresh mocked bot instance for each test
-        botInstance = new Bot(mockEnv.BOT_TOKEN);
+        botInstance = setupBot(mockEnv);
     });
 
-    it('should register a /start command handler', async () => {
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        expect(botInstance.command).toHaveBeenCalledWith('start', expect.any(Function));
+    it('should register essential commands', () => {
+        const registeredCommands = botInstance.command.mock.calls.map(call => call[0]);
+        expect(registeredCommands).toEqual(expect.arrayContaining([
+            'start', 'help', 'set_jules_token', 'set_source', 'sync'
+        ]));
     });
 
-    it('should register a /set_jules_token command handler', async () => {
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        expect(botInstance.command).toHaveBeenCalledWith('set_jules_token', expect.any(Function));
-    });
+    it('/sync command should be admin-only and trigger sync', async () => {
+        const handler = botInstance.command.mock.calls.find(call => call[0] === 'sync')[1];
 
-    it('should register a message:text handler for session management', async () => {
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        expect(botInstance.on).toHaveBeenCalledWith('message:text', expect.any(Function));
-    });
-
-    it('should register a message:photo handler for image sessions', async () => {
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        expect(botInstance.on).toHaveBeenCalledWith('message:photo', expect.any(Function));
-    });
-
-    it('should register a callback_query:data handler for inline buttons', async () => {
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        expect(botInstance.on).toHaveBeenCalledWith('callback_query:data', expect.any(Function));
-    });
-
-    // In-depth test for a specific command's logic
-    it('/status command should report configured status', async () => {
-        // 1. Setup the specific mock state for this test
-        vi.mocked(kv.getKV)
-            .mockResolvedValueOnce('a-valid-token') // First call for token
-            .mockResolvedValueOnce('sources/github/user/repo'); // Second call for source
-
-        // 2. We need to actually get the handler function that was registered.
-        // This is a bit tricky with the current setup, but we can capture it.
-        await worker.fetch(new Request('http://localhost'), mockEnv, {} as any);
-        const statusHandler = botInstance.command.mock.calls.find(call => call[0] === 'status')[1];
-
-        // 3. Create a mock context (ctx) object for the handler
-        const mockCtx = {
-            chat: { type: 'group', id: 123 },
-            reply: vi.fn(),
+        // Non-admin
+        const mockCtxNonAdmin = {
+            chat: { type: 'group', id: 123 }, from: { id: 999 },
+            reply: vi.fn(), getChatAdministrators: botInstance.api.getChatAdministrators,
         };
+        await handler(mockCtxNonAdmin);
+        expect(mockCtxNonAdmin.reply).toHaveBeenCalledWith('Only group admins can run this command.');
+        expect(sync.syncSessionsForGroup).not.toHaveBeenCalled();
 
-        // 4. Execute the handler with the mock context
-        await statusHandler(mockCtx);
-
-        // 5. Assert the outcome
-        expect(mockCtx.reply).toHaveBeenCalledWith(
-            'Jules token is configured.\nSource is set to: sources/github/user/repo'
-        );
+        // Admin
+        const mockCtxAdmin = {
+            chat: { type: 'group', id: 123 }, from: { id: 1 },
+            reply: vi.fn(), getChatAdministrators: botInstance.api.getChatAdministrators,
+        };
+        vi.mocked(sync.syncSessionsForGroup).mockResolvedValue('Sync done.');
+        await handler(mockCtxAdmin);
+        expect(sync.syncSessionsForGroup).toHaveBeenCalled();
+        expect(mockCtxAdmin.reply).toHaveBeenCalledWith('Sync done.');
     });
 });

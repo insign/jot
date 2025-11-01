@@ -55,17 +55,11 @@ export const pollActivities = async (bot: Bot, env: Env) => {
 	}
 };
 
-/**
- * Formats a long text into an expandable blockquote for Telegram.
- */
 const formatExpandable = (title: string, content: string): string => {
     const escapedContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return `<b>${title}</b>\n<blockquote expandable><pre><code>${escapedContent}</code></pre></blockquote>`;
 };
 
-/**
- * Formats an activity object into a user-friendly message.
- */
 const formatActivity = async (activity: any, sessionInfo: any, env: Env): Promise<FormattedMessage | null> => {
 	let text = `Unhandled activity type: <code>${activity.type}</code>`;
 	let disable_notification = true;
@@ -81,9 +75,7 @@ const formatActivity = async (activity: any, sessionInfo: any, env: Env): Promis
             const approvalRequired = session?.requirePlanApproval ?? true;
 
             text = `🎯 <b>PLAN CREATED</b>`;
-            if (approvalRequired) {
-                text += ` - <b>APPROVAL REQUIRED</b>`;
-            }
+            if (approvalRequired) text += ` - <b>APPROVAL REQUIRED</b>`;
             text += `\n${formatExpandable(`View ${plan.steps.length} Steps`, steps)}`;
 
             if (approvalRequired) {
@@ -104,21 +96,21 @@ const formatActivity = async (activity: any, sessionInfo: any, env: Env): Promis
             const details = activity.progressUpdated;
             if (details.title.includes('Ready for review')) {
                 text = `🎉 <b>Ready for review!</b>\n\nJules has finished the changes.`;
-                reply_markup = new InlineKeyboard()
-                    .text("📦 Publish branch", `publish_branch:${sessionId}`)
-                    .text("🔀 Publish PR", `publish_pr:${sessionId}`);
+                reply_markup = new InlineKeyboard().text("📦 Publish branch", `publish_branch:${sessionId}`).text("🔀 Publish PR", `publish_pr:${sessionId}`);
                 disable_notification = false;
             } else if (details.bashOutput) {
-                const command = details.bashOutput.command;
-                const output = details.bashOutput.output;
-                const exitCode = details.bashOutput.exitCode;
+                const { command, output, exitCode } = details.bashOutput;
                 text = formatExpandable(`🔧 Command executed: <code>${command}</code> (Exit: ${exitCode})`, output);
                 if (exitCode !== 0) {
                     text = `⚠️ ` + text;
-                    disable_notification = false;
+                    disable_notification = false; // Sound on error
                 }
+            } else if (details.changeSet?.patches?.length > 0) {
+                text = formatExpandable(`📁 Modified ${details.changeSet.patches.length} files`, details.changeSet.patches.map((p: any) => p.path).join('\n'));
+                disable_notification = true; // Silent for file changes
             } else {
                 text = `🔧 <b>Progress:</b> ${details.title}`;
+                disable_notification = true;
             }
 			break;
 
