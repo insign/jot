@@ -455,6 +455,65 @@ Contributions are welcome! Here's how to contribute:
 - Tests must pass before PR is merged
 - Aim for >80% code coverage
 
+## CI/CD Pipeline
+
+This project uses GitHub Actions for continuous integration and deployment.
+
+### Automated Workflows
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| **CI** | Push, PR | Runs tests, type checking, and build verification |
+| **Deploy** | Push to main/develop | Automatic deployment to Cloudflare Workers |
+| **PR Lint** | Pull requests | Validates PR format, size, and adds labels |
+| **CodeQL** | Push, PR, Weekly | Security analysis and vulnerability detection |
+| **Release** | Version tags (v*.*.*) | Creates GitHub releases with changelog |
+| **Performance** | Pull requests | Monitors bundle size and test performance |
+| **Dependabot** | Scheduled | Automated dependency updates |
+
+### Deployment Strategy
+
+- **Production** (`main` branch)
+  - Automatic deployment to production Worker
+  - Sets Telegram webhook automatically
+  - Runs health checks post-deployment
+
+- **Staging** (`develop` branch)
+  - Automatic deployment to staging Worker
+  - Separate bot token for testing
+  - Isolated environment from production
+
+### Required Secrets
+
+Configure these in GitHub repository settings:
+
+```
+CLOUDFLARE_API_TOKEN      # Cloudflare API token
+CLOUDFLARE_ACCOUNT_ID     # Cloudflare account ID
+BOT_TOKEN                 # Production Telegram bot token
+BOT_TOKEN_DEV            # Staging Telegram bot token
+PRODUCTION_WORKER_URL    # Production worker URL
+STAGING_WORKER_URL       # Staging worker URL
+```
+
+### Creating a Release
+
+```bash
+# Tag the commit with semantic version
+git tag v1.0.0
+
+# Push the tag to trigger release workflow
+git push origin v1.0.0
+```
+
+The release workflow will:
+- Run all tests
+- Generate changelog from commits
+- Create GitHub release
+- Attach release notes
+
+See [`.github/README.md`](.github/README.md) for detailed CI/CD documentation.
+
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later).
