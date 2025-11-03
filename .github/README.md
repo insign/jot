@@ -2,6 +2,20 @@
 
 This directory contains all GitHub Actions workflows for continuous integration, deployment, and automation.
 
+## ⚠️ Important: Secrets Configuration
+
+**Some workflows require GitHub secrets to function properly.** If you've just forked or cloned this repository, some workflows may show warnings or be skipped.
+
+📖 **See [SECRETS.md](SECRETS.md) for complete setup instructions** including:
+- Which secrets are required
+- How to obtain each secret
+- What happens without secrets
+- Step-by-step configuration guide
+
+**Quick Start**: At minimum, configure `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to enable deployments.
+
+---
+
 ## 📋 Workflows Overview
 
 ### 🔄 CI Pipeline (`ci.yml`)
