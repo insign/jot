@@ -1,0 +1,38 @@
+name = "jot-telegram-jules-bot"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers Paid plan required for cron triggers
+# Free plan: 100,000 requests/day
+# Paid plan: 10 million requests/month + $0.50 per additional million
+
+# KV Namespace for multi-tenant storage
+# Development environment will use a separate KV namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID_HERE"
+preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID_HERE"
+
+# Cron Triggers for automatic polling
+# Note: Cron triggers require Workers Paid plan
+[triggers]
+crons = [
+  "*/1 * * * *",   # Poll activities every 1 minute
+  "*/15 * * * *"   # Sync sessions every 15 minutes
+]
+
+# Environment variables (use wrangler secret for sensitive data)
+# Set BOT_TOKEN with: wrangler secret put BOT_TOKEN
+[vars]
+ENVIRONMENT = "production"
+
+# Development environment
+[env.dev]
+name = "jot-telegram-jules-bot-dev"
+vars = { ENVIRONMENT = "development" }
+
+# You can override KV namespace for dev if needed
+# [[env.dev.kv_namespaces]]
+# binding = "KV"
+# id = "YOUR_DEV_KV_NAMESPACE_ID"
