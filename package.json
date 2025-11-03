@@ -1,0 +1,35 @@
+{
+  "name": "jot-telegram-jules-bot",
+  "version": "0.1.0",
+  "description": "Telegram interface for Jules using Grammy and Cloudflare Workers",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "cf-typegen": "wrangler types"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "jules",
+    "cloudflare",
+    "workers",
+    "grammy"
+  ],
+  "author": "",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.20",
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0"
+  },
+  "dependencies": {
+    "grammy": "^1.32.0"
+  }
+}

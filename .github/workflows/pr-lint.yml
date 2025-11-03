@@ -1,0 +1,190 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-lint:
+    name: Lint Pull Request
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR title format
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            style
+            test
+          requireScope: false
+          subjectPattern: ^[A-Z].+$
+          subjectPatternError: |
+            The subject must start with an uppercase character.
+          validateSingleCommit: false
+          ignoreLabels: |
+            ignore-semantic-pull-request
+
+      - name: Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const additions = pr.additions;
+            const deletions = pr.deletions;
+            const changes = additions + deletions;
+
+            // Warn if PR is too large (>1000 lines)
+            if (changes > 1000) {
+              core.warning(`This PR has ${changes} line changes. Consider breaking it into smaller PRs for easier review.`);
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `⚠️ **Large PR Warning**\n\nThis PR has ${changes} line changes. Consider breaking it into smaller PRs for easier review.\n\n- Additions: ${additions}\n- Deletions: ${deletions}`
+              });
+            }
+
+      - name: Check PR description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+
+            // Check if PR has a description
+            if (body.trim().length === 0) {
+              core.setFailed('PR description is empty. Please add a description explaining your changes.');
+            }
+
+            // Check if PR has minimum length (at least 50 characters)
+            if (body.trim().length < 50 && body.trim().length > 0) {
+              core.warning('PR description is very short. Consider adding more details about your changes.');
+            }
+
+      - name: Label PR based on files changed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const labels = new Set();
+
+            for (const file of files) {
+              const filename = file.filename;
+
+              if (filename.startsWith('src/bot/')) labels.add('bot');
+              if (filename.startsWith('src/jules/')) labels.add('jules-api');
+              if (filename.startsWith('src/kv/')) labels.add('storage');
+              if (filename.startsWith('src/utils/')) labels.add('utilities');
+              if (filename.startsWith('test/')) labels.add('tests');
+              if (filename.startsWith('.github/')) labels.add('ci/cd');
+              if (filename === 'README.md' || filename.endsWith('.md')) labels.add('documentation');
+              if (filename === 'package.json' || filename === 'package-lock.json') labels.add('dependencies');
+              if (filename === 'wrangler.toml') labels.add('cloudflare');
+            }
+
+            if (labels.size > 0) {
+              // Get existing labels
+              const { data: existingLabels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+
+              const existingLabelNames = new Set(existingLabels.map(l => l.name));
+
+              // Add new labels
+              const labelsToAdd = Array.from(labels).filter(l => !existingLabelNames.has(l));
+
+              if (labelsToAdd.length > 0) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    labels: labelsToAdd
+                  });
+                  console.log(`Added labels: ${labelsToAdd.join(', ')}`);
+                } catch (error) {
+                  console.log(`Note: Some labels might not exist yet: ${error.message}`);
+                }
+              }
+            }
+
+      - name: Comment with PR stats
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const fileTypes = {};
+            for (const file of files) {
+              const ext = file.filename.split('.').pop();
+              fileTypes[ext] = (fileTypes[ext] || 0) + 1;
+            }
+
+            const statsComment = `## 📊 PR Statistics
+
+            - **Files changed**: ${files.length}
+            - **Additions**: ${pr.additions} lines
+            - **Deletions**: ${pr.deletions} lines
+            - **Total changes**: ${pr.additions + pr.deletions} lines
+
+            ### File types:
+            ${Object.entries(fileTypes).map(([ext, count]) => `- \`.${ext}\`: ${count} file(s)`).join('\n')}
+
+            ---
+            *This comment was automatically generated by PR Lint workflow*
+            `;
+
+            // Check if we already commented
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('PR Statistics')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: statsComment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: statsComment
+              });
+            }
