@@ -10,7 +10,8 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "wrangler": "wrangler"
   },
   "keywords": [
     "telegram",
