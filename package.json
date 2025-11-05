@@ -1,5 +1,5 @@
 {
-  "name": "jot-telegram-jules-bot",
+  "name": "jules-over-telegram",
   "version": "0.1.0",
   "description": "Telegram interface for Jules using Grammy and Cloudflare Workers",
   "main": "src/index.ts",

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main  # Production deployment
-      - develop  # Staging deployment
+      - develop  # Preview deployment
   workflow_dispatch:  # Allow manual deployment
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://jot-telegram-jules-bot.workers.dev
+      url: https://jules-over-telegram.cloudatlas.workers.dev
 
     steps:
       - name: Checkout code
@@ -38,33 +38,26 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env production
+          command: deploy
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
 
       - name: Set Telegram Webhook (Production)
         run: |
-          WORKER_URL="${{ secrets.PRODUCTION_WORKER_URL }}"
+          WORKER_URL="https://jules-over-telegram.cloudatlas.workers.dev"
           BOT_TOKEN="${{ secrets.BOT_TOKEN }}"
 
-          if [ -n "$WORKER_URL" ] && [ -n "$BOT_TOKEN" ]; then
-            curl -s "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${WORKER_URL}/webhook"
-            echo "Webhook set to: ${WORKER_URL}/webhook"
-          else
-            echo "Warning: PRODUCTION_WORKER_URL or BOT_TOKEN not set"
-          fi
+          curl -s "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${WORKER_URL}/webhook"
+          echo "Webhook set to: ${WORKER_URL}/webhook"
 
       - name: Verify deployment
         run: |
-          WORKER_URL="${{ secrets.PRODUCTION_WORKER_URL }}"
-          if [ -n "$WORKER_URL" ]; then
-            response=$(curl -s -o /dev/null -w "%{http_code}" "${WORKER_URL}/health")
-            if [ "$response" -eq 200 ]; then
-              echo "✅ Deployment successful! Health check passed."
-            else
-              echo "⚠️ Health check failed with status: $response"
-              exit 1
-            fi
+          response=$(curl -s -o /dev/null -w "%{http_code}" "https://jules-over-telegram.cloudatlas.workers.dev/health")
+          if [ "$response" -eq 200 ]; then
+            echo "✅ Deployment successful! Health check passed."
+          else
+            echo "⚠️ Health check failed with status: $response"
+            exit 1
           fi
 
       - name: Create deployment summary
@@ -72,19 +65,20 @@ jobs:
           echo "## 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: Production" >> $GITHUB_STEP_SUMMARY
-          echo "- **Worker URL**: ${{ secrets.PRODUCTION_WORKER_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker URL**: https://jules-over-telegram.cloudatlas.workers.dev" >> $GITHUB_STEP_SUMMARY
+          echo "- **Custom Domain**: https://jot.helio.me" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: main" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
-  # Deploy to Staging (develop branch)
-  deploy-staging:
-    name: Deploy to Staging
+  # Deploy to Preview (develop branch)
+  deploy-preview:
+    name: Deploy to Preview
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/develop'
     environment:
-      name: staging
-      url: https://jot-telegram-jules-bot-dev.workers.dev
+      name: preview
+      url: https://jules-over-telegram-cloudatlas.preview.pages.dev
 
     steps:
       - name: Checkout code
@@ -102,33 +96,41 @@ jobs:
       - name: Run tests
         run: npm test run
 
-      - name: Deploy to Cloudflare Workers (Staging)
+      - name: Deploy to Cloudflare Workers (Preview)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env dev
+          command: deploy --preview
         env:
-          BOT_TOKEN_DEV: ${{ secrets.BOT_TOKEN_DEV }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN_PREVIEW }}
 
-      - name: Set Telegram Webhook (Staging)
+      - name: Get preview URL
+        id: wrangler
         run: |
-          WORKER_URL="${{ secrets.STAGING_WORKER_URL }}"
-          BOT_TOKEN="${{ secrets.BOT_TOKEN_DEV }}"
+          npx wrangler whoami
+          npx wrangler deploy --dry-run --outdir=dist 2>&1 | tee deploy.log
+          PREVIEW_URL=$(grep -o 'https://[^[:space:]]*jules-over-telegram[[:space:]]' deploy.log | head -1)
+          echo "preview_url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
+
+      - name: Set Telegram Webhook (Preview)
+        run: |
+          WORKER_URL="${{ steps.wrangler.outputs.preview_url }}"
+          BOT_TOKEN="${{ secrets.BOT_TOKEN_PREVIEW }}"
 
           if [ -n "$WORKER_URL" ] && [ -n "$BOT_TOKEN" ]; then
             curl -s "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${WORKER_URL}/webhook"
             echo "Webhook set to: ${WORKER_URL}/webhook"
           else
-            echo "Warning: STAGING_WORKER_URL or BOT_TOKEN_DEV not set"
+            echo "Warning: Preview URL or BOT_TOKEN_PREVIEW not set"
           fi
 
       - name: Create deployment summary
         run: |
-          echo "## 🚧 Staging Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚧 Preview Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: Staging" >> $GITHUB_STEP_SUMMARY
-          echo "- **Worker URL**: ${{ secrets.STAGING_WORKER_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: Preview" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker URL**: ${{ steps.wrangler.outputs.preview_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: develop" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

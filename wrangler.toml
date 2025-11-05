@@ -1,4 +1,4 @@
-name = "jot-telegram-jules-bot"
+name = "jules-over-telegram"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 # Paid plan: 10 million requests/month + $0.50 per additional million
 
 # KV Namespace for multi-tenant storage
-# Development environment will use a separate KV namespace
+# Preview environment will use a separate KV namespace
 [[kv_namespaces]]
 binding = "KV"
 id = "YOUR_KV_NAMESPACE_ID_HERE"
@@ -26,13 +26,3 @@ crons = [
 # Set BOT_TOKEN with: wrangler secret put BOT_TOKEN
 [vars]
 ENVIRONMENT = "production"
-
-# Development environment
-[env.dev]
-name = "jot-telegram-jules-bot-dev"
-vars = { ENVIRONMENT = "development" }
-
-# You can override KV namespace for dev if needed
-# [[env.dev.kv_namespaces]]
-# binding = "KV"
-# id = "YOUR_DEV_KV_NAMESPACE_ID"

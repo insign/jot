@@ -334,12 +334,12 @@ wrangler deploy
 After deploying, configure the Telegram webhook:
 
 ```bash
-curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://your-worker.workers.dev/webhook"
+curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://jules-over-telegram.cloudatlas.workers.dev/webhook"
 ```
 
 Replace:
 - `<YOUR_BOT_TOKEN>` with your bot token from @BotFather
-- `your-worker.workers.dev` with your Worker's URL
+- Or use custom domain: `jot.helio.me/webhook` (configure in Cloudflare DNS)
 
 ### Verify Webhook
 
@@ -347,7 +347,7 @@ Replace:
 curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
 ```
 
-You should see `"url": "https://your-worker.workers.dev/webhook"` in the response.
+You should see `"url": "https://jules-over-telegram.cloudatlas.workers.dev/webhook"` or `"url": "https://jot.helio.me/webhook"` in the response.
 
 ### Cron Triggers
 
@@ -474,14 +474,15 @@ This project uses GitHub Actions for continuous integration and deployment.
 ### Deployment Strategy
 
 - **Production** (`main` branch)
-  - Automatic deployment to production Worker
+  - Automatic deployment to `jules-over-telegram.cloudatlas.workers.dev`
   - Sets Telegram webhook automatically
   - Runs health checks post-deployment
+  - Custom domain: `jot.helio.me` (configure in Cloudflare DNS)
 
-- **Staging** (`develop` branch)
-  - Automatic deployment to staging Worker
-  - Separate bot token for testing
-  - Isolated environment from production
+- **Development** (`develop` branch)
+  - Automatic deployment to preview URL (`*-jules-over-telegram.cloudatlas.workers.dev`)
+  - Uses preview KV namespace
+  - Uses preview bot token
 
 ### Required Secrets
 
@@ -491,9 +492,7 @@ Configure these in GitHub repository settings:
 CLOUDFLARE_API_TOKEN      # Cloudflare API token
 CLOUDFLARE_ACCOUNT_ID     # Cloudflare account ID
 BOT_TOKEN                 # Production Telegram bot token
-BOT_TOKEN_DEV            # Staging Telegram bot token
-PRODUCTION_WORKER_URL    # Production worker URL
-STAGING_WORKER_URL       # Staging worker URL
+BOT_TOKEN_PREVIEW        # Preview bot token for development
 ```
 
 ### Creating a Release
