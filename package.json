@@ -24,12 +24,12 @@
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.4",
-    "@cloudflare/workers-types": "^4.20241127.0",
-    "typescript": "^5.7.2",
+    "@cloudflare/workers-types": "^4.20251014.0",
+    "typescript": "^5.9.3",
     "vitest": "^3.0.0",
-    "wrangler": "^3.114.15"
+    "wrangler": "^4.45.4"
   },
   "dependencies": {
-    "grammy": "^1.32.0"
+    "grammy": "^1.38.3"
   }
 }
