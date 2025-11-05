@@ -12,7 +12,7 @@ compatibility_flags = ["nodejs_compat"]
 [[kv_namespaces]]
 binding = "KV"
 id = "106406036996474b9497d9fdeaa96780"
-preview_id = "6538ccd9726d459ca1e416ffbd41093e"
+preview_id = "e80c6e500c4549ca966201d288e9eaba"
 
 # Cron Triggers for automatic polling
 # Note: Cron triggers require Workers Paid plan
