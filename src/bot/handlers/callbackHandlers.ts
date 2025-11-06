@@ -301,7 +301,7 @@ export async function handleSourcesPageCallback(ctx: BotContext): Promise<void> 
 
 /**
  * Handle callback query for selecting a source
- * Pattern: select_source:{source_name}
+ * Pattern: select_source:{source_prefix}
  */
 export async function handleSelectSourceCallback(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
@@ -310,8 +310,7 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
     return;
   }
 
-  const sourceName = data.replace('select_source:', '');
-
+  const sourcePrefix = data.replace('select_source:', '');
   const groupId = getGroupId(ctx);
 
   if (!groupId) {
@@ -319,17 +318,42 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
     return;
   }
 
+  const token = await getJulesToken(ctx.env, groupId);
+
+  if (!token) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Jules token not configured' });
+    return;
+  }
+
   try {
+    // Get cached sources and find matching source
+    const { getSourcesCache } = await import('../../kv/storage');
+    const sources = await getSourcesCache(ctx.env, token);
+
+    if (!sources || sources.length === 0) {
+      await ctx.answerCallbackQuery({ text: '⚠️ Sources cache not found. Use /list_sources again.' });
+      return;
+    }
+
+    // Find source by prefix match
+    const source = sources.find(s => s.name.startsWith(sourcePrefix));
+
+    if (!source) {
+      await ctx.answerCallbackQuery({ text: '⚠️ Source not found. Please try again.' });
+      return;
+    }
+
+    // Save source
     const { setSource } = await import('../../kv/storage');
-    await setSource(ctx.env, groupId, sourceName);
+    await setSource(ctx.env, groupId, source.name);
 
     // Parse source name for display
-    const sourceDisplay = sourceName.split('/').slice(3).join('/'); // sources/github/user/repo -> user/repo
+    const sourceDisplay = source.name.split('/').slice(3).join('/'); // sources/github/user/repo -> user/repo
 
     // Update message to show confirmation
     await ctx.editMessageText(
       `<b>✅ Source Selected</b>\n\n` +
-      `<code>${escapeHtml(sourceName)}</code>\n\n` +
+      `<code>${escapeHtml(source.name)}</code>\n\n` +
       `This repository will now be used as default for new sessions.\n` +
       `You can change it anytime with /list_sources`,
       { parse_mode: 'HTML' }
@@ -367,8 +391,12 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
     const name = source.displayName || source.name.split('/').pop();
     const displayName = `${num}. ${name}`;
 
-    // Add source button
-    keyboard.text(`📦 ${displayName}`, `select_source:${source.name}`);
+    // Create callback data (first 40 chars to fit in 64 byte limit)
+    // Format: "sources/github/user/repo..." -> Use "sourcesgithubuserrepo" (max 40 chars)
+    const cleanName = source.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const callbackData = cleanName.substring(0, 40);
+
+    keyboard.text(`📦 ${displayName}`, `select_source:${callbackData}`);
 
     // Move to next line for next source
     keyboard.row();
