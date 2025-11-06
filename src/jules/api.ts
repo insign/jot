@@ -61,13 +61,34 @@ export class JulesAPI {
   /**
    * List all sources available to the user
    * GET /v1alpha/sources
+   * Supports pagination to fetch all sources
    */
   async listSources(): Promise<JulesSource[]> {
-    const response = await retryWithBackoff(() =>
-      this.request<{ sources: JulesSource[] }>('/sources')
-    );
+    let allSources: JulesSource[] = [];
+    let pageToken: string | undefined;
+    let pageCount = 0;
 
-    return response.sources || [];
+    do {
+      const endpoint = pageToken
+        ? `/sources?pageToken=${encodeURIComponent(pageToken)}`
+        : '/sources';
+
+      const response = await retryWithBackoff(() =>
+        this.request<{ sources: JulesSource[]; nextPageToken?: string }>(endpoint)
+      );
+
+      allSources = allSources.concat(response.sources || []);
+      pageToken = response.nextPageToken;
+      pageCount++;
+
+      // Safety limit to prevent infinite loops
+      if (pageCount > 100) {
+        console.warn('Reached maximum page count (100) for listSources');
+        break;
+      }
+    } while (pageToken);
+
+    return allSources;
   }
 
   /**
@@ -119,19 +140,22 @@ export class JulesAPI {
   }): Promise<JulesSession> {
     const body: any = {
       prompt: params.prompt,
-      source: params.source,
+      source_context: {
+        source: params.source,
+      },
     };
 
+    // Map automationMode to API values
     if (params.automationMode) {
-      body.automationMode = params.automationMode;
+      body.automation_mode = params.automationMode === 'AUTO_PR' ? 'AUTOMATION_MODE_AUTOMATIC' : 'AUTOMATION_MODE_MANUAL';
     }
 
     if (params.requirePlanApproval !== undefined) {
-      body.requirePlanApproval = params.requirePlanApproval;
+      body.require_plan_approval = params.requirePlanApproval;
     }
 
     if (params.startingBranch) {
-      body.startingBranch = params.startingBranch;
+      body.starting_branch = params.startingBranch;
     }
 
     if (params.media) {
