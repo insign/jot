@@ -152,7 +152,7 @@ describe('Jules API', () => {
       });
 
       let body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-      expect(body.automation_mode).toBe('AUTOMATION_MODE_AUTOMATIC');
+      expect(body.automation_mode).toBe(1); // AUTOMATION_MODE_AUTOMATIC
 
       // Test MANUAL
       await client.createSession({
@@ -162,7 +162,7 @@ describe('Jules API', () => {
       });
 
       body = JSON.parse(mockFetch.mock.calls[1][1].body as string);
-      expect(body.automation_mode).toBe('AUTOMATION_MODE_MANUAL');
+      expect(body.automation_mode).toBe(2); // AUTOMATION_MODE_MANUAL
     });
 
     it('should handle optional parameters', async () => {
