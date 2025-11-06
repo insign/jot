@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL: When Starting a Conversation
+
+**When start, before reply anything to the user, fetch these links to understand the documentation:**
+
+- https://grammy.dev
+- https://grammy.dev/hosting/cloudflare-workers-nodejs
+- https://developers.cloudflare.com/workers/wrangler/environments/
+- https://grammy.dev/ref/core/webhookcallback
+- https://developers.cloudflare.com/workers/configuration/cron-triggers/
+- https://developers.cloudflare.com/kv/
+- https://developers.google.com/jules/api
+- https://core.telegram.org/bots/api
+- https://developers.google.com/jules/api/reference/rest
+- https://developers.google.com/jules/api/reference/rest/v1alpha/sources
+- https://developers.google.com/jules/api/reference/rest/v1alpha/sessions.activities/list
+- https://grammy.dev/ref/core/api
+- https://core.telegram.org/bots/api#sendphoto
+- https://grammy.dev/plugins/keyboard
+- https://grammy.dev/guide/files
+- https://core.telegram.org/bots/api#formatting-options
+- https://core.telegram.org/bots/api#inlinekeyboardmarkup
+- https://grammy.dev/guide/commands
+- https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
+- https://developers.cloudflare.com/workers/wrangler/commands/#deploy
+- https://vitest.dev
+- https://developers.cloudflare.com/workers/testing/vitest-integration/
+- https://developers.cloudflare.com/workers/testing/miniflare/
+- https://jules.google
+- https://developers.cloudflare.com/workers/observability/logging/
+
 ## Project Overview
 
 Jot is a Cloudflare Worker that provides a Telegram bot interface for Jules (Google's AI coding assistant). It uses Grammy framework for Telegram integration and implements a multi-tenant architecture where each Telegram group has isolated configuration and sessions. Each Telegram topic (forum thread) maps 1:1 to a Jules session for perfect organization.
@@ -67,8 +97,8 @@ wrangler deploy
 npm install
 
 # Create KV namespaces (development and preview)
-wrangler kv:namespace create "KV"
-wrangler kv:namespace create "KV" --preview
+wrangler kv namespace create "KV"
+wrangler kv namespace create "KV" --preview
 
 # Set secrets
 wrangler secret put BOT_TOKEN
@@ -314,10 +344,10 @@ await setGroupConfig(env, groupId, { ...config, key: value });
 
 ```bash
 # Production
-wrangler kv:namespace create "KV"
+wrangler kv namespace create "KV"
 
 # Development
-wrangler kv:namespace create "KV" --preview
+wrangler kv namespace create "KV" --preview
 ```
 
 Update `wrangler.toml:12-15` with namespace IDs.

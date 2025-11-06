@@ -92,10 +92,10 @@ npm install -g wrangler
 
 ```bash
 # Create production KV namespace
-wrangler kv:namespace create "KV"
+wrangler kv namespace create "KV"
 
 # Create preview KV namespace for development
-wrangler kv:namespace create "KV" --preview
+wrangler kv namespace create "KV" --preview
 ```
 
 Copy the namespace IDs from the output and update `wrangler.toml`:
@@ -115,6 +115,8 @@ wrangler secret put BOT_TOKEN
 ```
 
 When prompted, paste your bot token from @BotFather.
+
+**⚠️ IMPORTANT**: The `BOT_TOKEN` must be configured as a secret in your Cloudflare Workers environment. This is separate from CI/CD secrets. You need to set it using `wrangler secret put BOT_TOKEN` even if it's already in your GitHub Actions secrets. The Workers runtime cannot access GitHub repository secrets directly.
 
 ## Bot Setup
 
@@ -387,6 +389,32 @@ Use `/open_jules_settings` to quickly access the web interface for these feature
 - Bot must be admin in the group
 - Bot must have "Manage Topics" permission
 - Bot must have privacy mode disabled (@BotFather → /setprivacy → Disable)
+
+**Check Worker secrets:**
+- Verify `BOT_TOKEN` is configured: `wrangler secret list`
+- If missing, add it: `wrangler secret put BOT_TOKEN`
+- Redeploy after adding secrets: `wrangler deploy`
+
+### "500 Internal Server Error" on Webhook
+
+**Common causes:**
+1. **Missing BOT_TOKEN secret** - The Worker doesn't have access to the BOT_TOKEN
+2. **Invalid Jules API token** - Use `/set_jules_token` to configure and validate
+
+**Solution:**
+```bash
+# Check secrets
+wrangler secret list
+
+# Add BOT_TOKEN if missing
+wrangler secret put BOT_TOKEN
+
+# Redeploy
+wrangler deploy
+
+# Check webhook status
+curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
+```
 
 ### "Token not configured" Error
 
