@@ -14,6 +14,7 @@ import {
 } from '../../kv/storage';
 import { createJulesClient } from '../../jules/api';
 import { extractGitHubLinks, formatGitHubLinks } from '../../utils/github';
+import { escapeHtml } from '../../utils/formatters';
 
 /**
  * Handle callback query for approving plan
@@ -247,6 +248,124 @@ export async function handleCancelDeleteCallback(ctx: BotContext): Promise<void>
 }
 
 /**
+ * Handle callback query for sources pagination
+ * Pattern: sources_page:{page_number}
+ */
+export async function handleSourcesPageCallback(ctx: BotContext): Promise<void> {
+  const data = ctx.callbackQuery?.data;
+
+  if (!data || !data.startsWith('sources_page:')) {
+    return;
+  }
+
+  const page = parseInt(data.replace('sources_page:', ''));
+
+  if (isNaN(page) || page < 0) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Invalid page number' });
+    return;
+  }
+
+  const groupId = getGroupId(ctx);
+
+  if (!groupId) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Invalid context' });
+    return;
+  }
+
+  const token = await getJulesToken(ctx.env, groupId);
+
+  if (!token) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Jules token not configured' });
+    return;
+  }
+
+  try {
+    // Get cached sources
+    const { getSourcesCache } = await import('../../kv/storage');
+    const sources = await getSourcesCache(ctx.env, token);
+
+    if (!sources || sources.length === 0) {
+      await ctx.answerCallbackQuery({ text: '⚠️ Sources cache not found. Use /list_sources again.' });
+      return;
+    }
+
+    // Show requested page
+    await showSourcesPage(ctx, sources, page);
+
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error('Error handling sources page:', error);
+    await ctx.answerCallbackQuery({ text: '❌ Failed to load page' });
+  }
+}
+
+/**
+ * Show a specific page of sources with pagination keyboard
+ * Shared between handleListSources and handleSourcesPageCallback
+ */
+export async function showSourcesPage(ctx: BotContext, sources: any[], page: number): Promise<void> {
+  const PAGE_SIZE = 10;
+  const totalPages = Math.ceil(sources.length / PAGE_SIZE);
+  const start = page * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, sources.length);
+  const pageSources = sources.slice(start, end);
+
+  let message = `<b>📚 Available Sources (${sources.length} total)</b>\n\n`;
+  message += `<i>Page ${page + 1} of ${totalPages}</i>\n\n`;
+
+  pageSources.forEach((source, index) => {
+    const num = start + index + 1;
+    const name = source.displayName || source.name.split('/').pop();
+    message += `<b>${num}.</b> ${escapeHtml(name)}\n`;
+    if (source.description) {
+      message += `   <i>${escapeHtml(source.description)}</i>\n`;
+    }
+  });
+
+  // Create pagination keyboard
+  const { InlineKeyboard } = await import('grammy');
+  const keyboard = new InlineKeyboard();
+
+  if (totalPages > 1) {
+    if (page > 0) {
+      keyboard.text(`⬅️ Prev (${page})`, `sources_page:${page - 1}`);
+    }
+
+    if (page < totalPages - 1) {
+      keyboard.text(`Next (${page + 2}) ➡️`, `sources_page:${page + 1}`);
+    }
+
+    // Add close button on new row
+    keyboard.row();
+    keyboard.text('❌ Close', 'sources_close');
+  }
+
+  await ctx.editMessageText(message, {
+    parse_mode: 'HTML',
+    reply_markup: keyboard,
+  });
+}
+
+/**
+ * Handle callback query for closing sources list
+ * Pattern: sources_close
+ */
+export async function handleSourcesCloseCallback(ctx: BotContext): Promise<void> {
+  const data = ctx.callbackQuery?.data;
+
+  if (data !== 'sources_close') {
+    return;
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    await ctx.answerCallbackQuery({ text: '✅ Closed' });
+  } catch (error) {
+    console.error('Error closing sources:', error);
+  }
+}
+
+/**
  * Main callback query handler
  * Routes to specific handlers based on callback data pattern
  */
@@ -268,6 +387,10 @@ export async function handleCallbackQuery(ctx: BotContext): Promise<void> {
     await handleDeleteSessionCallback(ctx);
   } else if (data === 'cancel_delete') {
     await handleCancelDeleteCallback(ctx);
+  } else if (data.startsWith('sources_page:')) {
+    await handleSourcesPageCallback(ctx);
+  } else if (data === 'sources_close') {
+    await handleSourcesCloseCallback(ctx);
   } else {
     // Unknown callback
     await ctx.answerCallbackQuery({ text: '⚠️ Unknown action' });

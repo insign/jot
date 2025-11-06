@@ -87,7 +87,7 @@ export async function handleGetSource(ctx: BotContext): Promise<void> {
 
 /**
  * /list_sources command
- * List all available sources from Jules API
+ * List all available sources from Jules API with pagination
  */
 export async function handleListSources(ctx: BotContext): Promise<void> {
   const groupId = getGroupId(ctx);
@@ -110,27 +110,37 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
     return;
   }
 
-  await ctx.reply('🔄 Fetching sources from Jules...');
+  await ctx.reply('🔄 Loading sources...');
 
   try {
-    const julesClient = createJulesClient(token);
-    console.log('[DEBUG] JulesClient created, calling listSources...');
-    const sources = await julesClient.listSources();
+    // Try to get from cache first
+    const { getSourcesCache, setSourcesCache } = await import('../../kv/storage');
+    let sources = await getSourcesCache(ctx.env, token);
 
-    if (sources.length === 0) {
-      await ctx.reply('No sources found. Please connect a repository at https://jules.google');
-      return;
-    }
+    // If not in cache, fetch from API
+    if (!sources) {
+      const julesClient = createJulesClient(token);
+      console.log('[DEBUG] JulesClient created, calling listSources...');
+      const rawSources = await julesClient.listSources();
 
-    const formattedSources = formatSourcesList(
-      sources.map(s => ({
+      if (rawSources.length === 0) {
+        await ctx.reply('No sources found. Please connect a repository at https://jules.google');
+        return;
+      }
+
+      sources = rawSources.map(s => ({
         name: s.name,
         displayName: s.displayName,
         description: s.description,
-      }))
-    );
+      }));
 
-    await ctx.reply(formattedSources, { parse_mode: 'HTML' });
+      // Cache the results for 1 hour
+      await setSourcesCache(ctx.env, token, sources);
+    }
+
+    // Show first page (10 sources per page)
+    const { showSourcesPage } = await import('../handlers/callbackHandlers');
+    await showSourcesPage(ctx, sources, 0);
   } catch (error) {
     console.error('Error fetching sources:', error);
     await ctx.reply(

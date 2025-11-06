@@ -240,3 +240,35 @@ export async function getGroupConfig(env: Env, groupId: string): Promise<GroupCo
 export function logStorageAccess(groupId: string, operation: string, key: string): void {
   console.log(`[KV Access] Group: ${groupId}, Operation: ${operation}, Key: ${key}`);
 }
+
+/**
+ * Cache for sources list to avoid API rate limits
+ */
+export async function getSourcesCache(env: Env, token: string): Promise<any[] | null> {
+  const key = `cache:sources:${hashToken(token)}`;
+  const cached = await env.KV.get(key);
+  if (!cached) return null;
+  return JSON.parse(cached);
+}
+
+export async function setSourcesCache(env: Env, token: string, sources: any[]): Promise<void> {
+  const key = `cache:sources:${hashToken(token)}`;
+  // Cache for 1 hour
+  await env.KV.put(key, JSON.stringify(sources), { expirationTtl: 3600 });
+}
+
+export async function clearSourcesCache(env: Env, token: string): Promise<void> {
+  const key = `cache:sources:${hashToken(token)}`;
+  await env.KV.delete(key);
+}
+
+// Simple hash function for token (for cache key)
+function hashToken(token: string): string {
+  let hash = 0;
+  for (let i = 0; i < token.length; i++) {
+    const char = token.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
