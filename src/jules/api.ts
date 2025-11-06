@@ -162,16 +162,19 @@ export class JulesAPI {
       },
     };
 
-    if (params.automationMode) {
-      body.automationMode = params.automationMode;
+    // Map automationMode to API values (correct format for Jules API)
+    if (params.automationMode === 'AUTO_PR') {
+      body.automation_mode = 'AUTOMATION_MODE_AUTOMATIC';
+    } else if (params.automationMode === 'MANUAL') {
+      body.automation_mode = 'AUTOMATION_MODE_MANUAL';
     }
 
     if (params.requirePlanApproval !== undefined) {
-      body.requirePlanApproval = params.requirePlanApproval;
+      body.require_plan_approval = params.requirePlanApproval;
     }
 
     if (params.startingBranch) {
-      body.startingBranch = params.startingBranch;
+      body.starting_branch = params.startingBranch;
     }
 
     if (params.media) {
