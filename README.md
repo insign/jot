@@ -31,15 +31,15 @@ The bot automatically polls for updates from Jules and sends them to your Telegr
 ## Architecture
 
 ```
-┌─────────────┐     Webhook      ┌──────────────────┐
-│  Telegram   │ ───────────────► │  Cloudflare      │
+┌─────────────┐     Webhook       ┌──────────────────┐
+│  Telegram   │ ───────────────►  │  Cloudflare      │
 │             │                   │  Worker          │
 │  User sends │                   │  (Grammy Bot)    │
 │  message or │                   │                  │
 │  image      │                   └────────┬─────────┘
 └─────────────┘                            │
                                            │ API Call
-                 ┌─────────────────────────▼────────┐
+                 ┌─────────────────────────▼─────────┐
                  │                                   │
                  │  Jules API                        │
                  │  (sessions, activities, sources)  │
@@ -47,13 +47,13 @@ The bot automatically polls for updates from Jules and sends them to your Telegr
                  └───────────────┬───────────────────┘
                                  │
       ┌──────────────────────────┴──────────────────────┐
-      │                                                  │
+      │                                                 │
       │  Cron Trigger (every 1 min)                     │
-      │  - Poll new activities for all sessions          │
-      │  - Process and format activities                 │
-      │  - Send to appropriate Telegram topic            │
-      │                                                  │
-      └──────────────────────────┬───────────────────────┘
+      │  - Poll new activities for all sessions         │
+      │  - Process and format activities                │
+      │  - Send to appropriate Telegram topic           │
+      │                                                 │
+      └──────────────────────────┬──────────────────────┘
                                  │
                                  ▼
                           ┌─────────────┐

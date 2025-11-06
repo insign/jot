@@ -163,10 +163,11 @@ export class JulesAPI {
     };
 
     // Map automationMode to API values (correct format for Jules API)
+    // Protobuf enums typically use numeric values
     if (params.automationMode === 'AUTO_PR') {
-      body.automation_mode = 'AUTOMATION_MODE_AUTOMATIC';
+      body.automation_mode = 1; // AUTOMATION_MODE_AUTOMATIC
     } else if (params.automationMode === 'MANUAL') {
-      body.automation_mode = 'AUTOMATION_MODE_MANUAL';
+      body.automation_mode = 2; // AUTOMATION_MODE_MANUAL
     }
 
     if (params.requirePlanApproval !== undefined) {
