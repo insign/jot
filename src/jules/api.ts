@@ -162,22 +162,24 @@ export class JulesAPI {
       },
     };
 
-    // Map automationMode to API values (correct format for Jules API)
-    // Protobuf enums typically use numeric values
-    // Based on Jules UI: Interactive, Plan Mode, Autonomous
-    if (params.automationMode === 'INTERACTIVE') {
-      body.automation_mode = 1; // Interactive mode
-    } else if (params.automationMode === 'PLAN') {
-      body.automation_mode = 2; // Plan mode only
-    } else if (params.automationMode === 'AUTO') {
-      body.automation_mode = 3; // Autonomous mode
+    // Only send automation_mode if explicitly specified
+    // Default might be handled by the API
+    if (params.automationMode) {
+      if (params.automationMode === 'INTERACTIVE') {
+        body.automation_mode = 1;
+      } else if (params.automationMode === 'PLAN') {
+        body.automation_mode = 2;
+      } else if (params.automationMode === 'AUTO') {
+        body.automation_mode = 3;
+      }
     }
 
-    if (params.requirePlanApproval !== undefined) {
+    // Only send optional fields if provided
+    if (params.requirePlanApproval !== undefined && params.requirePlanApproval !== null) {
       body.require_plan_approval = params.requirePlanApproval;
     }
 
-    if (params.startingBranch) {
+    if (params.startingBranch && params.startingBranch.trim() !== '') {
       body.starting_branch = params.startingBranch;
     }
 
