@@ -21,6 +21,13 @@ describe('formatters', () => {
     it('should handle empty string', () => {
       expect(escapeHtml('')).toBe('');
     });
+
+    it('should handle null and undefined gracefully (critical fix)', () => {
+      // This was causing "Cannot read properties of undefined (reading 'replace')"
+      expect(escapeHtml(null)).toBe('');
+      expect(escapeHtml(undefined)).toBe('');
+      // Jules API sometimes returns undefined values
+    });
   });
 
   describe('createExpandableBlockquote', () => {

@@ -5,8 +5,12 @@
 
 /**
  * Escape HTML special characters for Telegram HTML parse mode
+ * Handles null/undefined gracefully (Jules API may return undefined values)
  */
-export function escapeHtml(text: string): string {
+export function escapeHtml(text: string | undefined | null): string {
+  if (text === null || text === undefined) {
+    return '';
+  }
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

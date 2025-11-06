@@ -31,7 +31,7 @@ export class JulesAPI {
     const response = await fetch(url, {
       ...options,
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-Goog-Api-Key': this.apiKey,
         'Content-Type': 'application/json',
         ...options.headers,
       },
@@ -61,13 +61,50 @@ export class JulesAPI {
   /**
    * List all sources available to the user
    * GET /v1alpha/sources
+   * Supports pagination for large result sets
    */
   async listSources(): Promise<JulesSource[]> {
-    const response = await retryWithBackoff(() =>
-      this.request<{ sources: JulesSource[] }>('/sources')
-    );
+    const allSources: JulesSource[] = [];
+    let pageToken: string | undefined;
+    const seenTokens = new Set<string>();
+    let pageCount = 0;
 
-    return response.sources || [];
+    do {
+      // Build request URL with page token if present
+      const url = pageToken
+        ? `/sources?pageToken=${encodeURIComponent(pageToken)}`
+        : '/sources';
+
+      const response = await retryWithBackoff(() =>
+        this.request<{ sources: JulesSource[]; nextPageToken?: string }>(url)
+      );
+
+      // Add sources from this page
+      if (response.sources && response.sources.length > 0) {
+        allSources.push(...response.sources);
+      }
+
+      // Get next page token
+      pageToken = response.nextPageToken;
+
+      // Prevent infinite loops by tracking seen tokens
+      if (pageToken) {
+        if (seenTokens.has(pageToken)) {
+          console.warn('Detected pagination loop, stopping');
+          break;
+        }
+        seenTokens.add(pageToken);
+      }
+
+      pageCount++;
+      // Safety limit to prevent excessive API calls
+      if (pageCount > 50) {
+        console.warn('Reached maximum page count, stopping pagination');
+        break;
+      }
+    } while (pageToken);
+
+    return allSources;
   }
 
   /**
@@ -119,7 +156,9 @@ export class JulesAPI {
   }): Promise<JulesSession> {
     const body: any = {
       prompt: params.prompt,
-      source: params.source,
+      source_context: {
+        source: params.source,
+      },
     };
 
     if (params.automationMode) {
