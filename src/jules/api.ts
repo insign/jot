@@ -63,54 +63,11 @@ export class JulesAPI {
    * GET /v1alpha/sources
    */
   async listSources(): Promise<JulesSource[]> {
-<<<<<<< HEAD
-    let allSources: JulesSource[] = [];
-    let pageToken: string | undefined;
-    let pageCount = 0;
-    const seenTokens = new Set<string>();
-
-    do {
-      const endpoint = pageToken
-        ? `/sources?pageToken=${encodeURIComponent(pageToken)}`
-        : '/sources';
-
-      const response = await retryWithBackoff(() =>
-        this.request<{ sources: JulesSource[]; nextPageToken?: string }>(endpoint)
-      );
-
-      allSources = allSources.concat(response.sources || []);
-      const newToken = response.nextPageToken;
-
-      // Stop if no next page token
-      if (!newToken) {
-        break;
-      }
-
-      // Stop if we've seen this token before (infinite loop protection)
-      if (seenTokens.has(newToken)) {
-        console.warn('Detected duplicate page token, stopping pagination');
-        break;
-      }
-
-      seenTokens.add(newToken);
-      pageToken = newToken;
-      pageCount++;
-
-      // Safety limit to prevent infinite loops
-      if (pageCount >= 50) {
-        console.warn('Reached maximum page count (50) for listSources');
-        break;
-      }
-    } while (pageToken);
-
-    return allSources;
-=======
     const response = await retryWithBackoff(() =>
       this.request<{ sources: JulesSource[] }>('/sources')
     );
 
     return response.sources || [];
->>>>>>> parent of 4434ac4 (fix: Add pagination to listSources and fix session creation schema)
   }
 
   /**
