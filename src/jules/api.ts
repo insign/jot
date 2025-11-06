@@ -147,7 +147,7 @@ export class JulesAPI {
   async createSession(params: {
     prompt: string;
     source: string;
-    automationMode?: 'AUTO_PR' | 'MANUAL';
+    automationMode?: 'INTERACTIVE' | 'PLAN' | 'AUTO';
     requirePlanApproval?: boolean;
     startingBranch?: string;
     media?: {
@@ -164,10 +164,13 @@ export class JulesAPI {
 
     // Map automationMode to API values (correct format for Jules API)
     // Protobuf enums typically use numeric values
-    if (params.automationMode === 'AUTO_PR') {
-      body.automation_mode = 1; // AUTOMATION_MODE_AUTOMATIC
-    } else if (params.automationMode === 'MANUAL') {
-      body.automation_mode = 2; // AUTOMATION_MODE_MANUAL
+    // Based on Jules UI: Interactive, Plan Mode, Autonomous
+    if (params.automationMode === 'INTERACTIVE') {
+      body.automation_mode = 1; // Interactive mode
+    } else if (params.automationMode === 'PLAN') {
+      body.automation_mode = 2; // Plan mode only
+    } else if (params.automationMode === 'AUTO') {
+      body.automation_mode = 3; // Autonomous mode
     }
 
     if (params.requirePlanApproval !== undefined) {
