@@ -97,7 +97,9 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
     return;
   }
 
+  console.log('[DEBUG] Group ID:', groupId);
   const token = await getJulesToken(ctx.env, groupId);
+  console.log('[DEBUG] Token from KV:', token ? token.substring(0, 20) + '...' : 'null');
 
   if (!token) {
     await ctx.reply(
@@ -112,6 +114,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 
   try {
     const julesClient = createJulesClient(token);
+    console.log('[DEBUG] JulesClient created, calling listSources...');
     const sources = await julesClient.listSources();
 
     if (sources.length === 0) {
