@@ -3,6 +3,9 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange)](https://workers.cloudflare.com/)
+[![CI](https://github.com/insign/jot/actions/workflows/ci.yml/badge.svg)](https://github.com/insign/jot/actions/workflows/ci.yml)
+[![Deploy](https://github.com/insign/jot/actions/workflows/deploy.yml/badge.svg)](https://github.com/insign/jot/actions/workflows/deploy.yml)
+[![CodeQL](https://github.com/insign/jot/actions/workflows/codeql.yml/badge.svg)](https://github.com/insign/jot/actions/workflows/codeql.yml)
 
 A powerful Telegram bot that provides a seamless interface to Jules (Google's AI coding assistant), built with Grammy and deployed on Cloudflare Workers.
 
@@ -483,63 +486,16 @@ Contributions are welcome! Here's how to contribute:
 - Tests must pass before PR is merged
 - Aim for >80% code coverage
 
-## CI/CD Pipeline
+## CI/CD
 
-This project uses GitHub Actions for continuous integration and deployment.
+This project includes a complete CI/CD pipeline with GitHub Actions:
 
-### Automated Workflows
+- ✅ **Automated Testing** - Runs on every push and PR
+- 🚀 **Automatic Deployment** - Push to `main` deploys to production, `develop` to staging
+- 🔒 **Security Scanning** - CodeQL analysis on every push
+- 📦 **Release Automation** - Tag a version to create a GitHub release
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| **CI** | Push, PR | Runs tests, type checking, and build verification |
-| **Deploy** | Push to main/develop | Automatic deployment to Cloudflare Workers |
-| **PR Lint** | Pull requests | Validates PR format, size, and adds labels |
-| **CodeQL** | Push, PR, Weekly | Security analysis and vulnerability detection |
-| **Release** | Version tags (v*.*.*) | Creates GitHub releases with changelog |
-| **Performance** | Pull requests | Monitors bundle size and test performance |
-| **Dependabot** | Scheduled | Automated dependency updates |
-
-### Deployment Strategy
-
-- **Production** (`main` branch)
-  - Automatic deployment to `jules-over-telegram.cloudatlas.workers.dev`
-  - Sets Telegram webhook automatically
-  - Runs health checks post-deployment
-  - Custom domain: `jot.helio.me` (configure in Cloudflare DNS)
-
-- **Development** (`develop` branch)
-  - Automatic deployment to preview URL (`*-jules-over-telegram.cloudatlas.workers.dev`)
-  - Uses preview KV namespace
-  - Uses preview bot token
-
-### Required Secrets
-
-Configure these in GitHub repository settings:
-
-```
-CLOUDFLARE_API_TOKEN      # Cloudflare API token
-CLOUDFLARE_ACCOUNT_ID     # Cloudflare account ID
-BOT_TOKEN                 # Production Telegram bot token
-BOT_TOKEN_PREVIEW        # Preview bot token for development
-```
-
-### Creating a Release
-
-```bash
-# Tag the commit with semantic version
-git tag v1.0.0
-
-# Push the tag to trigger release workflow
-git push origin v1.0.0
-```
-
-The release workflow will:
-- Run all tests
-- Generate changelog from commits
-- Create GitHub release
-- Attach release notes
-
-See [`.github/README.md`](.github/README.md) for detailed CI/CD documentation.
+**For Contributors**: See [`.github/README.md`](.github/README.md) for detailed CI/CD documentation, required secrets, and workflow details.
 
 ## License
 
