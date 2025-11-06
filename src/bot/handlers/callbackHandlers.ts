@@ -300,6 +300,49 @@ export async function handleSourcesPageCallback(ctx: BotContext): Promise<void> 
 }
 
 /**
+ * Handle callback query for selecting a source
+ * Pattern: select_source:{source_name}
+ */
+export async function handleSelectSourceCallback(ctx: BotContext): Promise<void> {
+  const data = ctx.callbackQuery?.data;
+
+  if (!data || !data.startsWith('select_source:')) {
+    return;
+  }
+
+  const sourceName = data.replace('select_source:', '');
+
+  const groupId = getGroupId(ctx);
+
+  if (!groupId) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Invalid context' });
+    return;
+  }
+
+  try {
+    const { setSource } = await import('../../kv/storage');
+    await setSource(ctx.env, groupId, sourceName);
+
+    // Parse source name for display
+    const sourceDisplay = sourceName.split('/').slice(3).join('/'); // sources/github/user/repo -> user/repo
+
+    // Update message to show confirmation
+    await ctx.editMessageText(
+      `<b>✅ Source Selected</b>\n\n` +
+      `<code>${escapeHtml(sourceName)}</code>\n\n` +
+      `This repository will now be used as default for new sessions.\n` +
+      `You can change it anytime with /list_sources`,
+      { parse_mode: 'HTML' }
+    );
+
+    await ctx.answerCallbackQuery({ text: `✅ Selected: ${sourceDisplay}` });
+  } catch (error) {
+    console.error('Error selecting source:', error);
+    await ctx.answerCallbackQuery({ text: '❌ Failed to select source' });
+  }
+}
+
+/**
  * Show a specific page of sources with pagination keyboard
  * Shared between handleListSources and handleSourcesPageCallback
  */
@@ -312,20 +355,26 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
 
   let message = `<b>📚 Available Sources (${sources.length} total)</b>\n\n`;
   message += `<i>Page ${page + 1} of ${totalPages}</i>\n\n`;
-
-  pageSources.forEach((source, index) => {
-    const num = start + index + 1;
-    const name = source.displayName || source.name.split('/').pop();
-    message += `<b>${num}.</b> ${escapeHtml(name)}\n`;
-    if (source.description) {
-      message += `   <i>${escapeHtml(source.description)}</i>\n`;
-    }
-  });
+  message += `<i>Tap a source to select it as default</i>\n\n`;
 
   // Create pagination keyboard
   const { InlineKeyboard } = await import('grammy');
   const keyboard = new InlineKeyboard();
 
+  // Add buttons for each source (1 per line)
+  pageSources.forEach((source, index) => {
+    const num = start + index + 1;
+    const name = source.displayName || source.name.split('/').pop();
+    const displayName = `${num}. ${name}`;
+
+    // Add source button
+    keyboard.text(`📦 ${displayName}`, `select_source:${source.name}`);
+
+    // Move to next line for next source
+    keyboard.row();
+  });
+
+  // Add pagination buttons
   if (totalPages > 1) {
     if (page > 0) {
       keyboard.text(`⬅️ Prev (${page})`, `sources_page:${page - 1}`);
@@ -397,6 +446,8 @@ export async function handleCallbackQuery(ctx: BotContext): Promise<void> {
     await handleCancelDeleteCallback(ctx);
   } else if (data.startsWith('sources_page:')) {
     await handleSourcesPageCallback(ctx);
+  } else if (data.startsWith('select_source:')) {
+    await handleSelectSourceCallback(ctx);
   } else if (data === 'sources_close') {
     await handleSourcesCloseCallback(ctx);
   } else {
