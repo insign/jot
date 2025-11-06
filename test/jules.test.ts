@@ -134,7 +134,7 @@ describe('Jules API', () => {
       expect(body).not.toHaveProperty('source'); // Old format should not exist
     });
 
-    it('should handle automationMode correctly', async () => {
+    it('should handle automationMode correctly (INTERACTIVE, PLAN, AUTO)', async () => {
       mockFetch.mockReturnValue(
         Promise.resolve({
           ok: true,
@@ -144,25 +144,35 @@ describe('Jules API', () => {
 
       const client = createJulesClient('test-key');
 
-      // Test AUTO_PR
+      // Test INTERACTIVE
       await client.createSession({
         prompt: 'Fix bug',
         source: 'sources/github/user/repo',
-        automationMode: 'AUTO_PR',
+        automationMode: 'INTERACTIVE',
       });
 
       let body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-      expect(body.automation_mode).toBe(1); // AUTOMATION_MODE_AUTOMATIC
+      expect(body.automation_mode).toBe(1); // Interactive mode
 
-      // Test MANUAL
+      // Test PLAN
       await client.createSession({
         prompt: 'Fix bug',
         source: 'sources/github/user/repo',
-        automationMode: 'MANUAL',
+        automationMode: 'PLAN',
       });
 
       body = JSON.parse(mockFetch.mock.calls[1][1].body as string);
-      expect(body.automation_mode).toBe(2); // AUTOMATION_MODE_MANUAL
+      expect(body.automation_mode).toBe(2); // Plan mode only
+
+      // Test AUTO
+      await client.createSession({
+        prompt: 'Fix bug',
+        source: 'sources/github/user/repo',
+        automationMode: 'AUTO',
+      });
+
+      body = JSON.parse(mockFetch.mock.calls[2][1].body as string);
+      expect(body.automation_mode).toBe(3); // Autonomous mode
     });
 
     it('should handle optional parameters', async () => {
