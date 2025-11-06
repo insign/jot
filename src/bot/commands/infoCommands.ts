@@ -85,11 +85,9 @@ export async function handleGetSource(ctx: BotContext): Promise<void> {
   );
 }
 
-import { generateSourcesKeyboard } from '../../utils/formatters';
-
 /**
  * /list_sources command
- * List all available sources from Jules API with visual interface
+ * List all available sources from Jules API
  */
 export async function handleListSources(ctx: BotContext): Promise<void> {
   const groupId = getGroupId(ctx);
@@ -121,19 +119,15 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
       return;
     }
 
-    // Generate keyboard with pagination (first page)
-    const keyboard = generateSourcesKeyboard(
+    const formattedSources = formatSourcesList(
       sources.map(s => ({
         name: s.name,
         displayName: s.displayName,
-      })),
-      0 // page 0
+        description: s.description,
+      }))
     );
 
-    await ctx.reply(keyboard.text, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard.reply_markup,
-    });
+    await ctx.reply(formattedSources, { parse_mode: 'HTML' });
   } catch (error) {
     console.error('Error fetching sources:', error);
     await ctx.reply(

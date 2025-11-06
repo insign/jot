@@ -11,11 +11,9 @@ import {
   deleteSession as deleteSessionKV,
   removeFromSessionsIndex,
   setPendingPlan,
-  setSource,
 } from '../../kv/storage';
 import { createJulesClient } from '../../jules/api';
 import { extractGitHubLinks, formatGitHubLinks } from '../../utils/github';
-import { generateSourcesKeyboard } from '../../utils/formatters';
 
 /**
  * Handle callback query for approving plan
@@ -249,101 +247,6 @@ export async function handleCancelDeleteCallback(ctx: BotContext): Promise<void>
 }
 
 /**
- * Handle sources pagination callback
- * Pattern: sources_page:{page_number}
- */
-export async function handleSourcesPageCallback(ctx: BotContext): Promise<void> {
-  const data = ctx.callbackQuery?.data;
-
-  if (!data || !data.startsWith('sources_page:')) {
-    return;
-  }
-
-  const page = parseInt(data.replace('sources_page:', ''), 10);
-
-  const groupId = getGroupId(ctx);
-
-  if (!groupId) {
-    await ctx.answerCallbackQuery({ text: '⚠️ Invalid context' });
-    return;
-  }
-
-  const token = await getJulesToken(ctx.env, groupId);
-
-  if (!token) {
-    await ctx.answerCallbackQuery({ text: '⚠️ Jules token not configured' });
-    return;
-  }
-
-  try {
-    const julesClient = createJulesClient(token);
-    const sources = await julesClient.listSources();
-
-    const keyboard = generateSourcesKeyboard(
-      sources.map(s => ({
-        name: s.name,
-        displayName: s.displayName,
-      })),
-      page
-    );
-
-    await ctx.editMessageText(keyboard.text, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard.reply_markup,
-    });
-
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error('Error changing sources page:', error);
-    await ctx.answerCallbackQuery({ text: '❌ Failed to load page' });
-  }
-}
-
-/**
- * Handle source selection callback
- * Pattern: select_source:{source_name}
- */
-export async function handleSelectSourceCallback(ctx: BotContext): Promise<void> {
-  const data = ctx.callbackQuery?.data;
-
-  if (!data || !data.startsWith('select_source:')) {
-    return;
-  }
-
-  const sourceName = data.replace('select_source:', '');
-  const groupId = getGroupId(ctx);
-
-  if (!groupId) {
-    await ctx.answerCallbackQuery({ text: '⚠️ Invalid context' });
-    return;
-  }
-
-  try {
-    // Store the selected source
-    await setSource(ctx.env, groupId, sourceName);
-
-    await ctx.editMessageText(
-      `✅ <b>Source configurado:</b>\n<code>${sourceName}</code>\n\n` +
-      'Agora você pode usar /new_session para criar uma nova sessão!',
-      { parse_mode: 'HTML' }
-    );
-
-    await ctx.answerCallbackQuery({ text: '✅ Source configurado!' });
-  } catch (error) {
-    console.error('Error selecting source:', error);
-    await ctx.answerCallbackQuery({ text: '❌ Failed to set source' });
-  }
-}
-
-/**
- * Handle close callback
- */
-export async function handleCloseCallback(ctx: BotContext): Promise<void> {
-  await ctx.editMessageText('❌ Fechado');
-  await ctx.answerCallbackQuery();
-}
-
-/**
  * Main callback query handler
  * Routes to specific handlers based on callback data pattern
  */
@@ -365,12 +268,6 @@ export async function handleCallbackQuery(ctx: BotContext): Promise<void> {
     await handleDeleteSessionCallback(ctx);
   } else if (data === 'cancel_delete') {
     await handleCancelDeleteCallback(ctx);
-  } else if (data.startsWith('sources_page:')) {
-    await handleSourcesPageCallback(ctx);
-  } else if (data.startsWith('select_source:')) {
-    await handleSelectSourceCallback(ctx);
-  } else if (data === 'close') {
-    await handleCloseCallback(ctx);
   } else {
     // Unknown callback
     await ctx.answerCallbackQuery({ text: '⚠️ Unknown action' });
