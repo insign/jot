@@ -78,46 +78,13 @@ describe('Jules API', () => {
     });
   });
 
-  describe('listSources - Pagination', () => {
-    it('should handle pagination correctly', async () => {
-      let callCount = 0;
-      mockFetch.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          // First page
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              sources: [{ name: 'source1' }, { name: 'source2' }],
-              nextPageToken: 'token123',
-            }),
-          });
-        } else {
-          // Second page
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              sources: [{ name: 'source3' }, { name: 'source4' }],
-            }),
-          });
-        }
-      });
-
-      const client = createJulesClient('test-key');
-      const sources = await client.listSources();
-
-      expect(sources).toHaveLength(4);
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('should prevent infinite loops in pagination', async () => {
-      // Always return same page token
+  describe('listSources', () => {
+    it('should fetch sources list', async () => {
       mockFetch.mockReturnValue(
         Promise.resolve({
           ok: true,
           json: async () => ({
-            sources: [{ name: 'source1' }],
-            nextPageToken: 'loop-token',
+            sources: [{ name: 'source1' }, { name: 'source2' }],
           }),
         })
       );
@@ -125,10 +92,8 @@ describe('Jules API', () => {
       const client = createJulesClient('test-key');
       const sources = await client.listSources();
 
-      // Should stop after detecting loop
-      expect(sources.length).toBeGreaterThan(0);
-      // Safety check - shouldn't make too many calls
-      expect(mockFetch.mock.calls.length).toBeLessThan(10);
+      expect(sources).toHaveLength(2);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should handle empty sources list', async () => {
