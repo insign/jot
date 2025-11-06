@@ -61,9 +61,9 @@ export class JulesAPI {
   /**
    * List all sources available to the user
    * GET /v1alpha/sources
-   * Supports pagination to fetch all sources
    */
   async listSources(): Promise<JulesSource[]> {
+<<<<<<< HEAD
     let allSources: JulesSource[] = [];
     let pageToken: string | undefined;
     let pageCount = 0;
@@ -104,6 +104,13 @@ export class JulesAPI {
     } while (pageToken);
 
     return allSources;
+=======
+    const response = await retryWithBackoff(() =>
+      this.request<{ sources: JulesSource[] }>('/sources')
+    );
+
+    return response.sources || [];
+>>>>>>> parent of 4434ac4 (fix: Add pagination to listSources and fix session creation schema)
   }
 
   /**
@@ -155,22 +162,19 @@ export class JulesAPI {
   }): Promise<JulesSession> {
     const body: any = {
       prompt: params.prompt,
-      source_context: {
-        source: params.source,
-      },
+      source: params.source,
     };
 
-    // Map automationMode to API values
     if (params.automationMode) {
-      body.automation_mode = params.automationMode === 'AUTO_PR' ? 'AUTOMATION_MODE_AUTOMATIC' : 'AUTOMATION_MODE_MANUAL';
+      body.automationMode = params.automationMode;
     }
 
     if (params.requirePlanApproval !== undefined) {
-      body.require_plan_approval = params.requirePlanApproval;
+      body.requirePlanApproval = params.requirePlanApproval;
     }
 
     if (params.startingBranch) {
-      body.starting_branch = params.startingBranch;
+      body.startingBranch = params.startingBranch;
     }
 
     if (params.media) {

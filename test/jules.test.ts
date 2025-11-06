@@ -113,45 +113,6 @@ describe('JulesAPI', () => {
       const sources = await client.listSources();
       expect(sources).toEqual([]);
     });
-
-    it('should handle pagination and fetch all pages', async () => {
-      const page1 = [
-        {
-          name: 'sources/github/user/repo1',
-          displayName: 'user/repo1',
-        },
-      ];
-      const page2 = [
-        {
-          name: 'sources/github/user/repo2',
-          displayName: 'user/repo2',
-        },
-      ];
-
-      // First page response
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          sources: page1,
-          nextPageToken: 'repo1',
-        }),
-        text: async () => '',
-      } as Response);
-
-      // Second page response
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          sources: page2,
-        }),
-        text: async () => '',
-      } as Response);
-
-      const sources = await client.listSources();
-      expect(sources).toEqual([...page1, ...page2]);
-    });
   });
 
   describe('listSessions', () => {
@@ -208,8 +169,7 @@ describe('JulesAPI', () => {
       const callArgs = mockFetch.mock.calls[0];
       const requestBody = JSON.parse(callArgs[1].body);
       expect(requestBody.prompt).toBe('New prompt');
-      expect(requestBody.source_context.source).toBe('sources/github/user/repo');
-      expect(requestBody.source).toBeUndefined();
+      expect(requestBody.source).toBe('sources/github/user/repo');
     });
 
     it('should include optional parameters when provided', async () => {
@@ -239,10 +199,9 @@ describe('JulesAPI', () => {
 
       const callArgs = mockFetch.mock.calls[0];
       const requestBody = JSON.parse(callArgs[1].body);
-      expect(requestBody.automation_mode).toBe('AUTOMATION_MODE_AUTOMATIC');
-      expect(requestBody.automationMode).toBeUndefined();
-      expect(requestBody.require_plan_approval).toBe(true);
-      expect(requestBody.starting_branch).toBe('develop');
+      expect(requestBody.automationMode).toBe('AUTO_PR');
+      expect(requestBody.requirePlanApproval).toBe(true);
+      expect(requestBody.startingBranch).toBe('develop');
     });
   });
 
