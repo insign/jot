@@ -67,6 +67,7 @@ export class JulesAPI {
     let allSources: JulesSource[] = [];
     let pageToken: string | undefined;
     let pageCount = 0;
+    const seenTokens = new Set<string>();
 
     do {
       const endpoint = pageToken
@@ -78,12 +79,26 @@ export class JulesAPI {
       );
 
       allSources = allSources.concat(response.sources || []);
-      pageToken = response.nextPageToken;
+      const newToken = response.nextPageToken;
+
+      // Stop if no next page token
+      if (!newToken) {
+        break;
+      }
+
+      // Stop if we've seen this token before (infinite loop protection)
+      if (seenTokens.has(newToken)) {
+        console.warn('Detected duplicate page token, stopping pagination');
+        break;
+      }
+
+      seenTokens.add(newToken);
+      pageToken = newToken;
       pageCount++;
 
       // Safety limit to prevent infinite loops
-      if (pageCount > 100) {
-        console.warn('Reached maximum page count (100) for listSources');
+      if (pageCount >= 50) {
+        console.warn('Reached maximum page count (50) for listSources');
         break;
       }
     } while (pageToken);
