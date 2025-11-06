@@ -85,13 +85,7 @@ cd jot
 npm install
 ```
 
-3. **Install Wrangler CLI globally (optional but recommended)**
-
-```bash
-npm install -g wrangler
-```
-
-4. **Create KV namespaces**
+3. **Create KV namespaces**
 
 ```bash
 # Create production KV namespace
@@ -291,9 +285,6 @@ Some Jules features can only be configured via the web interface:
 ```bash
 # Start local development server
 npm run dev
-
-# Or with wrangler directly
-wrangler dev
 ```
 
 The development server will run at `http://localhost:8787`.
@@ -329,9 +320,6 @@ npm run cf-typegen
 ```bash
 # Deploy to production
 npm run deploy
-
-# Or with wrangler directly
-wrangler deploy
 ```
 
 ### Set Up Telegram Webhook
