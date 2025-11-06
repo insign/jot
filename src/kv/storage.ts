@@ -64,15 +64,20 @@ export async function setDefaultBranch(env: Env, groupId: string, branch: string
 /**
  * Get automation mode for a group
  */
-export async function getAutomationMode(env: Env, groupId: string): Promise<'AUTO_PR' | 'MANUAL' | null> {
+export async function getAutomationMode(env: Env, groupId: string): Promise<'INTERACTIVE' | 'PLAN' | 'AUTO' | null> {
   const mode = await env.KV.get(keys.automationMode(groupId));
-  return mode as 'AUTO_PR' | 'MANUAL' | null;
+  // Validate the stored value matches expected type
+  if (mode === 'INTERACTIVE' || mode === 'PLAN' || mode === 'AUTO' || mode === null) {
+    return mode;
+  }
+  // Return null for invalid values (backward compatibility)
+  return null;
 }
 
 /**
  * Set automation mode for a group
  */
-export async function setAutomationMode(env: Env, groupId: string, mode: 'AUTO_PR' | 'MANUAL'): Promise<void> {
+export async function setAutomationMode(env: Env, groupId: string, mode: 'INTERACTIVE' | 'PLAN' | 'AUTO'): Promise<void> {
   await env.KV.put(keys.automationMode(groupId), mode);
 }
 

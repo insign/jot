@@ -238,7 +238,7 @@ export async function handleSessionInfo(ctx: BotContext): Promise<void> {
     info += `<b>Session ID:</b> <code>${escapeHtml(session.session_id)}</code>\n`;
     info += `<b>Source:</b> ${escapeHtml(session.source)}\n`;
     info += `<b>Status:</b> ${julesSession.state || 'active'}\n`;
-    info += `<b>Automation Mode:</b> ${session.automation_mode || 'MANUAL'}\n`;
+    info += `<b>Automation Mode:</b> ${session.automation_mode || 'INTERACTIVE'}\n`;
     info += `<b>Created:</b> ${new Date(session.created_at).toLocaleString()}\n`;
 
     if (session.starting_branch) {

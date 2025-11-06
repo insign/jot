@@ -22,7 +22,7 @@ export interface SessionData {
   group_id: string;
   topic_id: number;
   source: string;
-  automation_mode?: 'AUTO_PR' | 'MANUAL';
+  automation_mode?: 'INTERACTIVE' | 'PLAN' | 'AUTO';
   require_plan_approval?: boolean;
   starting_branch?: string;
   last_activity_id?: string;
@@ -42,7 +42,7 @@ export interface GroupConfig {
   jules_token: string;
   source?: string;
   default_branch?: string;
-  automation_mode?: 'AUTO_PR' | 'MANUAL';
+  automation_mode?: 'INTERACTIVE' | 'PLAN' | 'AUTO';
   require_approval?: boolean;
   sessions_index?: string[]; // Array of session_ids
 }
@@ -87,7 +87,7 @@ export interface JulesSession {
   source: string;
   prompt: string;
   state?: string;
-  automationMode?: 'AUTO_PR' | 'MANUAL';
+  automationMode?: 'INTERACTIVE' | 'PLAN' | 'AUTO';
   requirePlanApproval?: boolean;
   startingBranch?: string;
   outputs?: string;

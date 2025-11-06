@@ -93,13 +93,19 @@ export async function handleNewSession(ctx: BotContext): Promise<void> {
     const automationMode = await getAutomationMode(ctx.env, groupId);
     const requireApproval = await getRequireApproval(ctx.env, groupId);
 
-    const session = await julesClient.createSession({
+    const createParams: any = {
       prompt,
       source,
-      automationMode: automationMode || 'MANUAL',
       requirePlanApproval: requireApproval,
       startingBranch: defaultBranch || undefined,
-    });
+    };
+
+    // Only add automationMode if explicitly configured
+    if (automationMode) {
+      createParams.automationMode = automationMode;
+    }
+
+    const session = await julesClient.createSession(createParams);
 
     // Store session in KV
     const sessionData: SessionData = {
@@ -127,7 +133,7 @@ export async function handleNewSession(ctx: BotContext): Promise<void> {
       '✅ <b>Session created successfully!</b>\n\n' +
       `<b>Session ID:</b> <code>${session.name}</code>\n` +
       `<b>Source:</b> ${source}\n` +
-      `<b>Mode:</b> ${session.automationMode || 'MANUAL'}\n\n` +
+      `<b>Mode:</b> ${session.automationMode || 'INTERACTIVE'}\n\n` +
       'I will send you updates automatically as Jules works on your request.',
       { parse_mode: 'HTML' }
     );

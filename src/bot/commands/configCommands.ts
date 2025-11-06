@@ -189,8 +189,8 @@ export async function handleSetAutoPR(ctx: BotContext): Promise<void> {
     await ctx.reply(
       '⚠️ Please specify on or off.\n\n' +
       'Usage: /set_auto_pr &lt;on|off&gt;\n\n' +
-      'on = AUTO_PR mode (automatic PR creation)\n' +
-      'off = MANUAL mode (manual control)',
+      'on = AUTO mode (automatic PR creation)\n' +
+      'off = INTERACTIVE mode (manual control)',
       { parse_mode: 'HTML' }
     );
     return;
@@ -203,13 +203,13 @@ export async function handleSetAutoPR(ctx: BotContext): Promise<void> {
     return;
   }
 
-  const mode = value === 'on' ? 'AUTO_PR' : 'MANUAL';
+  const mode = value === 'on' ? 'AUTO' : 'INTERACTIVE';
 
   await setAutomationMode(ctx.env, groupId, mode);
 
   await ctx.reply(
     `✅ Automation mode set to: <b>${mode}</b>\n\n` +
-    (mode === 'AUTO_PR'
+    (mode === 'AUTO'
       ? 'Jules will automatically create PRs when sessions are complete.'
       : 'You will have manual control over when to publish branches and PRs.'),
     { parse_mode: 'HTML' }

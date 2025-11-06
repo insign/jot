@@ -76,13 +76,19 @@ export async function handleTextMessage(ctx: BotContext): Promise<void> {
         const automationMode = await getAutomationMode(ctx.env, groupId);
         const requireApproval = await getRequireApproval(ctx.env, groupId);
 
-        const julesSession = await julesClient.createSession({
+        const createParams: any = {
           prompt: text,
           source,
-          automationMode: automationMode || 'MANUAL',
           requirePlanApproval: requireApproval,
           startingBranch: defaultBranch || undefined,
-        });
+        };
+
+        // Only add automationMode if explicitly configured
+        if (automationMode) {
+          createParams.automationMode = automationMode;
+        }
+
+        const julesSession = await julesClient.createSession(createParams);
 
         // Store session in KV
         const sessionData: SessionData = {
@@ -222,14 +228,20 @@ export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
         const automationMode = await getAutomationMode(ctx.env, groupId);
         const requireApproval = await getRequireApproval(ctx.env, groupId);
 
-        const julesSession = await julesClient.createSession({
+        const createParams: any = {
           prompt: caption,
           source,
-          automationMode: automationMode || 'MANUAL',
           requirePlanApproval: requireApproval,
           startingBranch: defaultBranch || undefined,
           media: imageData,
-        });
+        };
+
+        // Only add automationMode if explicitly configured
+        if (automationMode) {
+          createParams.automationMode = automationMode;
+        }
+
+        const julesSession = await julesClient.createSession(createParams);
 
         // Store session in KV
         const sessionData: SessionData = {

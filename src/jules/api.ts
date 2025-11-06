@@ -61,51 +61,13 @@ export class JulesAPI {
   /**
    * List all sources available to the user
    * GET /v1alpha/sources
-   * Handles pagination to fetch ALL sources
    */
   async listSources(): Promise<JulesSource[]> {
-    const allSources: JulesSource[] = [];
-    let pageToken: string | undefined = undefined;
-    const seenTokens = new Set<string>();
-    let requestCount = 0;
+    const response = await retryWithBackoff(() =>
+      this.request<{ sources: JulesSource[] }>('/sources')
+    );
 
-    do {
-      // Build URL with page token if present
-      const url = pageToken
-        ? `/sources?pageToken=${encodeURIComponent(pageToken)}`
-        : '/sources';
-
-      const response = await retryWithBackoff(() =>
-        this.request<{ sources: JulesSource[]; nextPageToken?: string }>(url)
-      );
-
-      // Add sources from this page
-      if (response.sources && response.sources.length > 0) {
-        allSources.push(...response.sources);
-      }
-
-      // Get next page token
-      pageToken = response.nextPageToken;
-
-      // Safety: prevent infinite loops
-      if (pageToken) {
-        if (seenTokens.has(pageToken)) {
-          console.error('[Jules API] Pagination loop detected! Stopping.');
-          break;
-        }
-        seenTokens.add(pageToken);
-      }
-
-      requestCount++;
-      // Safety limit: Jules API shouldn't have more than 100 pages
-      if (requestCount > 100) {
-        console.error('[Jules API] Too many pages requested. Stopping at 100 pages.');
-        break;
-      }
-    } while (pageToken);
-
-    console.log(`[Jules API] Fetched ${allSources.length} sources in ${requestCount} request(s)`);
-    return allSources;
+    return response.sources || [];
   }
 
   /**
@@ -209,8 +171,8 @@ export class JulesAPI {
       };
     }
   ): Promise<void> {
-    await retryWithBackoff(() =>
-      this.request(`/sessions/${sessionId}:sendMessage`, {
+    await retryWithBackoff<void>(() =>
+      this.request<void>(`/sessions/${sessionId}:sendMessage`, {
         method: 'POST',
         body: JSON.stringify(params),
       })
@@ -222,8 +184,8 @@ export class JulesAPI {
    * POST /v1alpha/sessions/{session_id}:approvePlan
    */
   async approvePlan(sessionId: string): Promise<void> {
-    await retryWithBackoff(() =>
-      this.request(`/sessions/${sessionId}:approvePlan`, {
+    await retryWithBackoff<void>(() =>
+      this.request<void>(`/sessions/${sessionId}:approvePlan`, {
         method: 'POST',
         body: JSON.stringify({}),
       })

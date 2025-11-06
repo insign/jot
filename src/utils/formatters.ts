@@ -183,7 +183,7 @@ export function formatSessionStatus(
   status += `<b>Jules Token:</b> ${hasToken ? '✅ Configured' : '❌ Not configured'}\n`;
   status += `<b>Source:</b> ${source ? escapeHtml(source) : '❌ Not configured'}\n`;
   status += `<b>Default Branch:</b> ${defaultBranch || 'main'}\n`;
-  status += `<b>Automation Mode:</b> ${automationMode || 'MANUAL'}\n`;
+  status += `<b>Automation Mode:</b> ${automationMode || 'INTERACTIVE'}\n`;
   status += `<b>Require Plan Approval:</b> ${requireApproval ? 'Yes' : 'No'}\n`;
   status += `<b>Active Sessions:</b> ${sessionsCount || 0}\n`;
 
