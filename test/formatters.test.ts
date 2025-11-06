@@ -21,6 +21,14 @@ describe('formatters', () => {
     it('should handle empty string', () => {
       expect(escapeHtml('')).toBe('');
     });
+
+    it('should handle undefined', () => {
+      expect(escapeHtml(undefined)).toBe('');
+    });
+
+    it('should handle null', () => {
+      expect(escapeHtml(null)).toBe('');
+    });
   });
 
   describe('createExpandableBlockquote', () => {

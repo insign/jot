@@ -31,7 +31,7 @@ export class JulesAPI {
     const response = await fetch(url, {
       ...options,
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-Goog-Api-Key': this.apiKey,
         'Content-Type': 'application/json',
         ...options.headers,
       },
