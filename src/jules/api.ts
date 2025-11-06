@@ -61,13 +61,51 @@ export class JulesAPI {
   /**
    * List all sources available to the user
    * GET /v1alpha/sources
+   * Handles pagination to fetch ALL sources
    */
   async listSources(): Promise<JulesSource[]> {
-    const response = await retryWithBackoff(() =>
-      this.request<{ sources: JulesSource[] }>('/sources')
-    );
+    const allSources: JulesSource[] = [];
+    let pageToken: string | undefined = undefined;
+    const seenTokens = new Set<string>();
+    let requestCount = 0;
 
-    return response.sources || [];
+    do {
+      // Build URL with page token if present
+      const url = pageToken
+        ? `/sources?pageToken=${encodeURIComponent(pageToken)}`
+        : '/sources';
+
+      const response = await retryWithBackoff(() =>
+        this.request<{ sources: JulesSource[]; nextPageToken?: string }>(url)
+      );
+
+      // Add sources from this page
+      if (response.sources && response.sources.length > 0) {
+        allSources.push(...response.sources);
+      }
+
+      // Get next page token
+      pageToken = response.nextPageToken;
+
+      // Safety: prevent infinite loops
+      if (pageToken) {
+        if (seenTokens.has(pageToken)) {
+          console.error('[Jules API] Pagination loop detected! Stopping.');
+          break;
+        }
+        seenTokens.add(pageToken);
+      }
+
+      requestCount++;
+      // Safety limit: Jules API shouldn't have more than 100 pages
+      if (requestCount > 100) {
+        console.error('[Jules API] Too many pages requested. Stopping at 100 pages.');
+        break;
+      }
+    } while (pageToken);
+
+    console.log(`[Jules API] Fetched ${allSources.length} sources in ${requestCount} request(s)`);
+    return allSources;
   }
 
   /**

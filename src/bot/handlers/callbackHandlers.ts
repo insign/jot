@@ -301,7 +301,7 @@ export async function handleSourcesPageCallback(ctx: BotContext): Promise<void> 
 
 /**
  * Handle callback query for selecting a source
- * Pattern: select_source:{source_prefix}
+ * Pattern: select_source:{page}:{index}
  */
 export async function handleSelectSourceCallback(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
@@ -310,7 +310,21 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
     return;
   }
 
-  const sourcePrefix = data.replace('select_source:', '');
+  const parts = data.replace('select_source:', '').split(':');
+  if (parts.length !== 2) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Invalid selection' });
+    return;
+  }
+
+  const [pageStr, indexStr] = parts;
+  const page = parseInt(pageStr);
+  const index = parseInt(indexStr);
+
+  if (isNaN(page) || isNaN(index) || page < 0 || index < 0) {
+    await ctx.answerCallbackQuery({ text: '⚠️ Invalid selection data' });
+    return;
+  }
+
   const groupId = getGroupId(ctx);
 
   if (!groupId) {
@@ -326,7 +340,7 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
   }
 
   try {
-    // Get cached sources and find matching source
+    // Get cached sources and get specific source by page + index
     const { getSourcesCache } = await import('../../kv/storage');
     const sources = await getSourcesCache(ctx.env, token);
 
@@ -335,8 +349,17 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
       return;
     }
 
-    // Find source by prefix match
-    const source = sources.find(s => s.name.startsWith(sourcePrefix));
+    // Calculate actual index in sources array
+    const PAGE_SIZE = 10;
+    const start = page * PAGE_SIZE;
+    const actualIndex = start + index;
+
+    if (actualIndex >= sources.length) {
+      await ctx.answerCallbackQuery({ text: '⚠️ Source index out of range' });
+      return;
+    }
+
+    const source = sources[actualIndex];
 
     if (!source) {
       await ctx.answerCallbackQuery({ text: '⚠️ Source not found. Please try again.' });
@@ -391,12 +414,8 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
     const name = source.displayName || source.name.split('/').pop();
     const displayName = `${num}. ${name}`;
 
-    // Create callback data (first 40 chars to fit in 64 byte limit)
-    // Format: "sources/github/user/repo..." -> Use "sourcesgithubuserrepo" (max 40 chars)
-    const cleanName = source.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const callbackData = cleanName.substring(0, 40);
-
-    keyboard.text(`📦 ${displayName}`, `select_source:${callbackData}`);
+    // Use page:index for callback data (shorter, precise)
+    keyboard.text(`📦 ${displayName}`, `select_source:${page}:${index}`);
 
     // Move to next line for next source
     keyboard.row();
