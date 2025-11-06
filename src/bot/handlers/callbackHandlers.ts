@@ -340,10 +340,18 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
     keyboard.text('❌ Close', 'sources_close');
   }
 
-  await ctx.editMessageText(message, {
-    parse_mode: 'HTML',
-    reply_markup: keyboard,
-  });
+  // Use reply for first message, edit for callback queries
+  if (ctx.callbackQuery) {
+    await ctx.editMessageText(message, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+  } else {
+    await ctx.reply(message, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+  }
 }
 
 /**
