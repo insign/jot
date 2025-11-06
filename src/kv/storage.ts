@@ -253,8 +253,8 @@ export async function getSourcesCache(env: Env, token: string): Promise<any[] | 
 
 export async function setSourcesCache(env: Env, token: string, sources: any[]): Promise<void> {
   const key = `cache:sources:${hashToken(token)}`;
-  // Cache for 1 hour
-  await env.KV.put(key, JSON.stringify(sources), { expirationTtl: 3600 });
+  // Cache for 5 minutes (to see new repos quickly)
+  await env.KV.put(key, JSON.stringify(sources), { expirationTtl: 300 });
 }
 
 export async function clearSourcesCache(env: Env, token: string): Promise<void> {
