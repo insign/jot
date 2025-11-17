@@ -393,15 +393,18 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
  * Show a specific page of sources with pagination keyboard
  * Shared between handleListSources and handleSourcesPageCallback
  */
-export async function showSourcesPage(ctx: BotContext, sources: any[], page: number): Promise<void> {
+export async function showSourcesPage(ctx: BotContext, sources: any[], page: number, hasMore: boolean = false): Promise<void> {
   const PAGE_SIZE = 10;
   const totalPages = Math.ceil(sources.length / PAGE_SIZE);
   const start = page * PAGE_SIZE;
   const end = Math.min(start + PAGE_SIZE, sources.length);
   const pageSources = sources.slice(start, end);
 
-  let message = `<b>📚 Available Sources (${sources.length} total)</b>\n\n`;
+  let message = `<b>📚 Available Sources (${sources.length}${hasMore ? '+' : ''} total)</b>\n\n`;
   message += `<i>Page ${page + 1} of ${totalPages}</i>\n\n`;
+  if (hasMore) {
+    message += `<i>⚠️ Showing first ${sources.length} sources (timeout limit reached)</i>\n\n`;
+  }
   message += `<i>Tap a source to select it as default</i>\n\n`;
 
   // Create pagination keyboard

@@ -59,15 +59,110 @@ export class JulesAPI {
   }
 
   /**
-   * List all sources available to the user
+   * List all sources available to the user with timeout protection
    * GET /v1alpha/sources
+   * Fetches sources with a time limit to avoid worker timeouts
+   * @param timeoutMs - Maximum time to spend fetching (default 8000ms)
+   * @param pageSize - Number of sources per page (default 100)
+   * @returns Object with sources array and hasMore indicator
    */
-  async listSources(): Promise<JulesSource[]> {
-    const response = await retryWithBackoff(() =>
-      this.request<{ sources: JulesSource[] }>('/sources')
-    );
+  async listSources(timeoutMs: number = 8000, pageSize: number = 100): Promise<{ sources: JulesSource[]; hasMore: boolean }> {
+    console.log(`[listSources] Starting with ${timeoutMs}ms timeout, pageSize=${pageSize}`);
+    const startTime = Date.now();
 
-    return response.sources || [];
+    // Shared state between fetchSources and timeout
+    const sharedState = {
+      sources: [] as JulesSource[],
+      hasMore: false,
+      stopped: false,
+    };
+
+    const fetchSources = async (): Promise<void> => {
+      let nextPageToken: string | undefined;
+      let pageNum = 0;
+
+      try {
+        do {
+          // Check if we should stop
+          if (sharedState.stopped) {
+            console.log(`[listSources] Fetch stopped by timeout at page ${pageNum}`);
+            break;
+          }
+
+          pageNum++;
+
+          // Build URL with pageSize parameter
+          let url = `/sources?pageSize=${pageSize}`;
+          if (nextPageToken) {
+            url += `&pageToken=${encodeURIComponent(nextPageToken)}`;
+          }
+
+          console.log(`[listSources] Fetching page ${pageNum}...`);
+          const pageStart = Date.now();
+
+          const response = await retryWithBackoff(() =>
+            this.request<{ sources?: JulesSource[]; nextPageToken?: string }>(url),
+            { maxAttempts: 1 } // Single attempt to avoid delays
+          );
+
+          const pageTime = Date.now() - pageStart;
+
+          if (response.sources && response.sources.length > 0) {
+            sharedState.sources.push(...response.sources);
+            console.log(`[listSources] Page ${pageNum} returned ${response.sources.length} sources in ${pageTime}ms (total: ${sharedState.sources.length})`);
+          }
+
+          nextPageToken = response.nextPageToken;
+          sharedState.hasMore = !!nextPageToken;
+          console.log(`[listSources] Page ${pageNum} nextPageToken: ${nextPageToken ? 'exists' : 'null'}`);
+        } while (nextPageToken && !sharedState.stopped);
+
+        if (!sharedState.stopped) {
+          console.log(`[listSources] Fetch complete: ${sharedState.sources.length} total sources in ${Date.now() - startTime}ms`);
+        }
+      } catch (error) {
+        console.error('[listSources] Error in fetchSources:', error);
+        sharedState.hasMore = true; // Assume there might be more
+      }
+    };
+
+    // Start fetching (don't await yet)
+    const fetchPromise = fetchSources();
+
+    // Wait for either completion or timeout
+    await Promise.race([
+      fetchPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          console.log(`[listSources] Timeout triggered after ${timeoutMs}ms`);
+          sharedState.stopped = true;
+          sharedState.hasMore = true;
+          resolve();
+        }, timeoutMs);
+      })
+    ]);
+
+    // If we have no sources at all, try to get at least the first page
+    if (sharedState.sources.length === 0) {
+      console.log('[listSources] No sources collected, attempting first page...');
+      try {
+        const response = await retryWithBackoff(() =>
+          this.request<{ sources?: JulesSource[]; nextPageToken?: string }>(`/sources?pageSize=${pageSize}`),
+          { maxAttempts: 1 }
+        );
+
+        if (response.sources) {
+          sharedState.sources = response.sources;
+          sharedState.hasMore = !!response.nextPageToken;
+          console.log(`[listSources] First page fallback: ${sharedState.sources.length} sources`);
+        }
+      } catch (error) {
+        console.error('[listSources] Error fetching first page:', error);
+      }
+    }
+
+    console.log(`[listSources] Returning ${sharedState.sources.length} sources (hasMore: ${sharedState.hasMore}) in ${Date.now() - startTime}ms`);
+    return { sources: sharedState.sources, hasMore: sharedState.hasMore };
   }
 
   /**

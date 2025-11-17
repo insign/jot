@@ -116,23 +116,25 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
     // Try to get from cache first
     const { getSourcesCache, setSourcesCache } = await import('../../kv/storage');
     let sources = await getSourcesCache(ctx.env, token);
+    let hasMore = false;
 
     // If not in cache, fetch from API
     if (!sources) {
       const julesClient = createJulesClient(token);
       console.log('[DEBUG] JulesClient created, calling listSources...');
-      const rawSources = await julesClient.listSources();
+      const result = await julesClient.listSources();
 
-      if (rawSources.length === 0) {
+      if (result.sources.length === 0) {
         await ctx.reply('No sources found. Please connect a repository at https://jules.google');
         return;
       }
 
-      sources = rawSources.map(s => ({
+      sources = result.sources.map(s => ({
         name: s.name,
         displayName: s.displayName,
         description: s.description,
       }));
+      hasMore = result.hasMore;
 
       // Cache the results for 1 hour
       await setSourcesCache(ctx.env, token, sources);
@@ -140,7 +142,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 
     // Show first page (10 sources per page)
     const { showSourcesPage } = await import('../handlers/callbackHandlers');
-    await showSourcesPage(ctx, sources, 0);
+    await showSourcesPage(ctx, sources, 0, hasMore);
   } catch (error) {
     console.error('Error fetching sources:', error);
     await ctx.reply(
