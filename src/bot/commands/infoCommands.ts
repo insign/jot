@@ -118,11 +118,14 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
     let sources = await getSourcesCache(ctx.env, token);
     let hasMore = false;
 
-    // If not in cache, fetch from API
+    // If not in cache, fetch from API with extended timeout
     if (!sources) {
       const julesClient = createJulesClient(token);
       console.log('[DEBUG] JulesClient created, calling listSources...');
-      const result = await julesClient.listSources();
+
+      // Use 9s timeout to get as many sources as possible
+      // This should fetch 1-2 pages (100-200 sources) before timeout
+      const result = await julesClient.listSources(9000);
 
       if (result.sources.length === 0) {
         await ctx.reply('No sources found. Please connect a repository at https://jules.google');
@@ -138,6 +141,8 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 
       // Cache the results for 1 hour
       await setSourcesCache(ctx.env, token, sources);
+
+      console.log(`[DEBUG] Cached ${sources.length} sources (hasMore: ${hasMore})`);
     }
 
     // Show first page (10 sources per page)

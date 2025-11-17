@@ -62,11 +62,12 @@ export class JulesAPI {
    * List all sources available to the user with timeout protection
    * GET /v1alpha/sources
    * Fetches sources with a time limit to avoid worker timeouts
-   * @param timeoutMs - Maximum time to spend fetching (default 8000ms)
-   * @param pageSize - Number of sources per page (default 100)
+   * Optimized to fetch as many sources as possible within timeout
+   * @param timeoutMs - Maximum time to spend fetching (default 9000ms)
+   * @param pageSize - Number of sources per page (default 100, API max)
    * @returns Object with sources array and hasMore indicator
    */
-  async listSources(timeoutMs: number = 8000, pageSize: number = 100): Promise<{ sources: JulesSource[]; hasMore: boolean }> {
+  async listSources(timeoutMs: number = 9000, pageSize: number = 100): Promise<{ sources: JulesSource[]; hasMore: boolean }> {
     console.log(`[listSources] Starting with ${timeoutMs}ms timeout, pageSize=${pageSize}`);
     const startTime = Date.now();
 
