@@ -123,8 +123,8 @@ export default {
     // Webhook endpoint
     if (url.pathname === '/' || url.pathname === '/webhook') {
       try {
-        // Create bot instance
-        const bot = createBot(env.BOT_TOKEN, env);
+        // Create bot instance with waitUntil support for background tasks
+        const bot = createBot(env.BOT_TOKEN, env, ctx.waitUntil.bind(ctx));
 
         // Setup handlers
         setupBot(bot);

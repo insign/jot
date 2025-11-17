@@ -162,6 +162,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 /**
  * /refresh_sources command
  * Manually refresh the sources cache to fetch all available sources
+ * Uses background processing to avoid Worker timeout (10s limit)
  */
 export async function handleRefreshSources(ctx: BotContext): Promise<void> {
   const groupId = getGroupId(ctx);
@@ -182,33 +183,44 @@ export async function handleRefreshSources(ctx: BotContext): Promise<void> {
     return;
   }
 
-  await ctx.reply('🔄 Refreshing sources cache... This may take a minute.');
-
   try {
     // Register token as active for cron refresh
-    const { registerActiveToken } = await import('../../kv/storage');
+    const { registerActiveToken, clearSourcesCache } = await import('../../kv/storage');
     await registerActiveToken(ctx.env, token);
 
-    // Import and use the refresh function
-    const { refreshSourcesForToken } = await import('../../cron/refreshSourcesCache');
-    const result = await refreshSourcesForToken(ctx.env, token);
+    // Clear current cache to force fresh fetch
+    await clearSourcesCache(ctx.env, token);
 
-    if (result.count === 0) {
-      await ctx.reply('❌ Failed to refresh sources. Please try again later.');
-      return;
-    }
-
+    // Respond immediately to avoid timeout
     await ctx.reply(
-      `✅ <b>Sources cache refreshed!</b>\n\n` +
-      `📦 Found <b>${result.count}</b> sources${result.hasMore ? '+' : ''}\n` +
-      `${result.hasMore ? '⚠️ Note: Limited to 1000 sources max\n\n' : '\n'}` +
-      `Use /list_sources or /search_sources to browse.`,
+      '🔄 <b>Sources cache refresh started!</b>\n\n' +
+      '⏱️ This process will fetch all your repositories in the background.\n\n' +
+      '💡 The cron job will complete the refresh within 15 minutes.\n' +
+      'Use /list_sources in 1-2 minutes to see updated sources.',
       { parse_mode: 'HTML' }
     );
+
+    // Try to do partial refresh in background (3 pages max = 300 sources)
+    // This may or may not complete depending on Worker lifecycle
+    if (ctx.waitUntil) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            console.log('[refresh_sources] Starting background partial refresh...');
+            const { refreshSourcesForToken } = await import('../../cron/refreshSourcesCache');
+            // Limit to 3 pages to fit in Worker extended time
+            const result = await refreshSourcesForToken(ctx.env, token, 3);
+            console.log(`[refresh_sources] Background refresh: ${result.count} sources (hasMore: ${result.hasMore})`);
+          } catch (error) {
+            console.error('[refresh_sources] Background refresh error:', error);
+          }
+        })()
+      );
+    }
   } catch (error) {
-    console.error('Error refreshing sources:', error);
+    console.error('Error initiating refresh:', error);
     await ctx.reply(
-      '❌ Failed to refresh sources.\n\n' +
+      '❌ Failed to initiate refresh.\n\n' +
       'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
     );
   }

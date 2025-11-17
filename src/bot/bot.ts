@@ -11,18 +11,20 @@ import type { Env } from '../types/env';
  */
 export interface BotContext extends Context {
   env: Env;
+  waitUntil?: ExecutionContext['waitUntil'];
 }
 
 /**
  * Create and configure bot instance
  * Uses botInfo pre-configuration to avoid unnecessary getMe calls
  */
-export function createBot(botToken: string, env: Env): Bot<BotContext> {
+export function createBot(botToken: string, env: Env, waitUntil?: ExecutionContext['waitUntil']): Bot<BotContext> {
   const bot = new Bot<BotContext>(botToken);
 
-  // Attach env to context for all handlers
+  // Attach env and waitUntil to context for all handlers
   bot.use(async (ctx, next) => {
     ctx.env = env;
+    ctx.waitUntil = waitUntil;
     await next();
   });
 

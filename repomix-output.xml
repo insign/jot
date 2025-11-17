@@ -741,18 +741,20 @@ import type { Env } from '../types/env';
  */
 export interface BotContext extends Context {
   env: Env;
+  waitUntil?: ExecutionContext['waitUntil'];
 }
 
 /**
  * Create and configure bot instance
  * Uses botInfo pre-configuration to avoid unnecessary getMe calls
  */
-export function createBot(botToken: string, env: Env): Bot<BotContext> {
+export function createBot(botToken: string, env: Env, waitUntil?: ExecutionContext['waitUntil']): Bot<BotContext> {
   const bot = new Bot<BotContext>(botToken);
 
-  // Attach env to context for all handlers
+  // Attach env and waitUntil to context for all handlers
   bot.use(async (ctx, next) => {
     ctx.env = env;
+    ctx.waitUntil = waitUntil;
     await next();
   });
 
@@ -1127,142 +1129,6 @@ async function processNewActivities(
     } catch (error) {
       console.error(`[CRON] Error processing activity ${activity.name}:`, error);
     }
-  }
-}
-</file>
-
-<file path="src/cron/refreshSourcesCache.ts">
-/**
- * Refresh sources cache for all groups
- * Runs periodically to ensure cache is up-to-date
- * This allows search_sources to work with complete data
- */
-
-import type { Env } from '../types/env';
-import { createJulesClient } from '../jules/api';
-import { setSourcesCache } from '../kv/storage';
-
-/**
- * Fetch all sources for a token and update cache
- * Takes longer but gets complete list (up to 1000 sources = 10 pages)
- */
-export async function refreshSourcesForToken(env: Env, token: string): Promise<{ count: number; hasMore: boolean }> {
-  console.log('[refreshSourcesCache] Starting full sources fetch...');
-  const startTime = Date.now();
-
-  try {
-    const julesClient = createJulesClient(token);
-    const allSources: any[] = [];
-    let nextPageToken: string | undefined;
-    let pageNum = 0;
-    const pageSize = 100;
-    const maxPages = 10; // Limit to 1000 sources max
-
-    // Fetch all pages
-    do {
-      pageNum++;
-      let url = `/sources?pageSize=${pageSize}`;
-      if (nextPageToken) {
-        url += `&pageToken=${encodeURIComponent(nextPageToken)}`;
-      }
-
-      console.log(`[refreshSourcesCache] Fetching page ${pageNum}...`);
-
-      // Direct API call without timeout since we have more time in cron/manual refresh
-      const response = await fetch(`https://jules.googleapis.com/v1alpha${url}`, {
-        headers: {
-          'X-Goog-Api-Key': token,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        console.error(`[refreshSourcesCache] API error: ${response.status}`);
-        break;
-      }
-
-      const data: any = await response.json();
-
-      if (data.sources && data.sources.length > 0) {
-        const mapped = data.sources.map((s: any) => ({
-          name: s.name,
-          displayName: s.displayName,
-          description: s.description,
-        }));
-        allSources.push(...mapped);
-
-        console.log(`[refreshSourcesCache] Page ${pageNum}: +${data.sources.length} sources (total: ${allSources.length})`);
-      }
-
-      nextPageToken = data.nextPageToken;
-
-      // Safety limit: max 10 pages (1000 sources)
-      if (pageNum >= maxPages) {
-        console.log('[refreshSourcesCache] Reached page limit (10)');
-        break;
-      }
-    } while (nextPageToken);
-
-    // Update cache (1 hour TTL)
-    if (allSources.length > 0) {
-      await setSourcesCache(env, token, allSources);
-    }
-
-    const duration = Date.now() - startTime;
-    const hasMore = !!nextPageToken;
-    console.log(`[refreshSourcesCache] Complete: ${allSources.length} sources in ${duration}ms (${pageNum} pages, hasMore: ${hasMore})`);
-
-    return { count: allSources.length, hasMore };
-  } catch (error) {
-    console.error('[refreshSourcesCache] Error fetching sources:', error);
-    return { count: 0, hasMore: false };
-  }
-}
-
-/**
- * Main cron handler
- * Refreshes sources cache for all active tokens (tokens used in last 2 hours)
- */
-export async function refreshSourcesCache(env: Env): Promise<void> {
-  console.log('[refreshSourcesCache] Starting sources cache refresh cron...');
-  const startTime = Date.now();
-
-  try {
-    // Get all active tokens from registry
-    const { getActiveTokens } = await import('../kv/storage');
-    const tokens = await getActiveTokens(env);
-
-    if (tokens.length === 0) {
-      console.log('[refreshSourcesCache] No active tokens to refresh');
-      return;
-    }
-
-    console.log(`[refreshSourcesCache] Found ${tokens.length} active tokens to refresh`);
-
-    // Refresh each token's sources cache
-    let successCount = 0;
-    let errorCount = 0;
-
-    for (const token of tokens) {
-      try {
-        const result = await refreshSourcesForToken(env, token);
-        if (result.count > 0) {
-          successCount++;
-          console.log(`[refreshSourcesCache] ✓ Refreshed token: ${result.count} sources`);
-        } else {
-          errorCount++;
-          console.log(`[refreshSourcesCache] ✗ Failed to refresh token`);
-        }
-      } catch (error) {
-        errorCount++;
-        console.error(`[refreshSourcesCache] ✗ Error refreshing token:`, error);
-      }
-    }
-
-    const duration = Date.now() - startTime;
-    console.log(`[refreshSourcesCache] Complete: ${successCount} success, ${errorCount} errors in ${duration}ms`);
-  } catch (error) {
-    console.error('[refreshSourcesCache] Error in cache refresh cron:', error);
   }
 }
 </file>
@@ -5034,6 +4900,144 @@ export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
 }
 </file>
 
+<file path="src/cron/refreshSourcesCache.ts">
+/**
+ * Refresh sources cache for all groups
+ * Runs periodically to ensure cache is up-to-date
+ * This allows search_sources to work with complete data
+ */
+
+import type { Env } from '../types/env';
+import { createJulesClient } from '../jules/api';
+import { setSourcesCache } from '../kv/storage';
+
+/**
+ * Fetch all sources for a token and update cache
+ * Takes longer but gets complete list (up to 1000 sources = 10 pages)
+ * @param env - Cloudflare Worker environment
+ * @param token - Jules API token
+ * @param maxPages - Maximum number of pages to fetch (default: 10 = 1000 sources)
+ */
+export async function refreshSourcesForToken(env: Env, token: string, maxPages: number = 10): Promise<{ count: number; hasMore: boolean }> {
+  console.log(`[refreshSourcesCache] Starting sources fetch (max ${maxPages} pages)...`);
+  const startTime = Date.now();
+
+  try {
+    const julesClient = createJulesClient(token);
+    const allSources: any[] = [];
+    let nextPageToken: string | undefined;
+    let pageNum = 0;
+    const pageSize = 100;
+
+    // Fetch all pages
+    do {
+      pageNum++;
+      let url = `/sources?pageSize=${pageSize}`;
+      if (nextPageToken) {
+        url += `&pageToken=${encodeURIComponent(nextPageToken)}`;
+      }
+
+      console.log(`[refreshSourcesCache] Fetching page ${pageNum}...`);
+
+      // Direct API call without timeout since we have more time in cron/manual refresh
+      const response = await fetch(`https://jules.googleapis.com/v1alpha${url}`, {
+        headers: {
+          'X-Goog-Api-Key': token,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`[refreshSourcesCache] API error: ${response.status}`);
+        break;
+      }
+
+      const data: any = await response.json();
+
+      if (data.sources && data.sources.length > 0) {
+        const mapped = data.sources.map((s: any) => ({
+          name: s.name,
+          displayName: s.displayName,
+          description: s.description,
+        }));
+        allSources.push(...mapped);
+
+        console.log(`[refreshSourcesCache] Page ${pageNum}: +${data.sources.length} sources (total: ${allSources.length})`);
+      }
+
+      nextPageToken = data.nextPageToken;
+
+      // Safety limit to avoid excessive API calls
+      if (pageNum >= maxPages) {
+        console.log(`[refreshSourcesCache] Reached page limit (${maxPages})`);
+        break;
+      }
+    } while (nextPageToken);
+
+    // Update cache (1 hour TTL)
+    if (allSources.length > 0) {
+      await setSourcesCache(env, token, allSources);
+    }
+
+    const duration = Date.now() - startTime;
+    const hasMore = !!nextPageToken;
+    console.log(`[refreshSourcesCache] Complete: ${allSources.length} sources in ${duration}ms (${pageNum} pages, hasMore: ${hasMore})`);
+
+    return { count: allSources.length, hasMore };
+  } catch (error) {
+    console.error('[refreshSourcesCache] Error fetching sources:', error);
+    return { count: 0, hasMore: false };
+  }
+}
+
+/**
+ * Main cron handler
+ * Refreshes sources cache for all active tokens (tokens used in last 2 hours)
+ */
+export async function refreshSourcesCache(env: Env): Promise<void> {
+  console.log('[refreshSourcesCache] Starting sources cache refresh cron...');
+  const startTime = Date.now();
+
+  try {
+    // Get all active tokens from registry
+    const { getActiveTokens } = await import('../kv/storage');
+    const tokens = await getActiveTokens(env);
+
+    if (tokens.length === 0) {
+      console.log('[refreshSourcesCache] No active tokens to refresh');
+      return;
+    }
+
+    console.log(`[refreshSourcesCache] Found ${tokens.length} active tokens to refresh`);
+
+    // Refresh each token's sources cache
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const token of tokens) {
+      try {
+        const result = await refreshSourcesForToken(env, token);
+        if (result.count > 0) {
+          successCount++;
+          console.log(`[refreshSourcesCache] ✓ Refreshed token: ${result.count} sources`);
+        } else {
+          errorCount++;
+          console.log(`[refreshSourcesCache] ✗ Failed to refresh token`);
+        }
+      } catch (error) {
+        errorCount++;
+        console.error(`[refreshSourcesCache] ✗ Error refreshing token:`, error);
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`[refreshSourcesCache] Complete: ${successCount} success, ${errorCount} errors in ${duration}ms`);
+  } catch (error) {
+    console.error('[refreshSourcesCache] Error in cache refresh cron:', error);
+  }
+}
+</file>
+
 <file path="src/types/env.ts">
 /**
  * Environment bindings for Cloudflare Worker
@@ -5144,190 +5148,6 @@ export interface JulesSource {
     name?: string;
   };
 }
-</file>
-
-<file path="src/index.ts">
-/**
- * Jot - Telegram Interface for Jules
- * Main Cloudflare Worker entry point
- *
- * This worker provides a Telegram bot interface for Jules (Google's AI coding assistant)
- * Features:
- * - Multi-tenant support (each Telegram group is isolated)
- * - 1:1 mapping between Telegram topics and Jules sessions
- * - Automatic activity polling via cron triggers
- * - Image support (send screenshots/designs to Jules)
- * - Smart notifications (important events with sound, others silent)
- * - GitHub links extraction and formatting
- *
- * License: AGPL-3.0-or-later
- */
-
-import { createBot, createWebhookHandler } from './bot/bot';
-import type { BotContext } from './bot/bot';
-import type { Env } from './types/env';
-
-// Import command handlers
-import { handleStart, handleHelp } from './bot/commands/basicCommands';
-import {
-  handleSetJulesToken,
-  handleSetSource,
-  handleSetBranch,
-  handleSetAutoPR,
-  handleRequireApproval,
-} from './bot/commands/configCommands';
-import {
-  handleStatus,
-  handleGetSource,
-  handleListSources,
-  handleSearchSources,
-  handleRefreshSources,
-  handleListSessions,
-  handleSessionInfo,
-  handleListActivities,
-  handleShowPlan,
-  handleShowOutputs,
-  handleOpenJulesSettings,
-} from './bot/commands/infoCommands';
-import {
-  handleNewSession,
-  handleApprovePlan,
-  handleDeleteSession,
-  handleSync,
-} from './bot/commands/actionCommands';
-
-// Import message handlers
-import { handleTextMessage, handlePhotoMessage } from './bot/handlers/messageHandlers';
-import { handleCallbackQuery } from './bot/handlers/callbackHandlers';
-
-// Import cron handlers
-import { pollActivities } from './cron/pollActivities';
-import { syncSessions } from './cron/syncSessions';
-import { refreshSourcesCache } from './cron/refreshSourcesCache';
-
-/**
- * Setup bot with all command and message handlers
- */
-function setupBot(bot: ReturnType<typeof createBot>): void {
-  // Basic commands
-  bot.command('start', handleStart);
-  bot.command('help', handleHelp);
-
-  // Configuration commands (admin only)
-  bot.command('set_jules_token', handleSetJulesToken);
-  bot.command('set_source', handleSetSource);
-  bot.command('set_branch', handleSetBranch);
-  bot.command('set_auto_pr', handleSetAutoPR);
-  bot.command('require_approval', handleRequireApproval);
-
-  // Information commands
-  bot.command('status', handleStatus);
-  bot.command('get_source', handleGetSource);
-  bot.command('list_sources', handleListSources);
-  bot.command('search_sources', handleSearchSources);
-  bot.command('refresh_sources', handleRefreshSources);
-  bot.command('list_sessions', handleListSessions);
-  bot.command('session_info', handleSessionInfo);
-  bot.command('list_activities', handleListActivities);
-  bot.command('show_plan', handleShowPlan);
-  bot.command('show_outputs', handleShowOutputs);
-  bot.command('open_jules_settings', handleOpenJulesSettings);
-
-  // Action commands
-  bot.command('new_session', handleNewSession);
-  bot.command('approve_plan', handleApprovePlan);
-  bot.command('delete_session', handleDeleteSession);
-  bot.command('sync', handleSync);
-
-  // Message handlers
-  bot.on('message:text', handleTextMessage);
-  bot.on('message:photo', handlePhotoMessage);
-
-  // Callback query handlers (inline buttons)
-  bot.on('callback_query:data', handleCallbackQuery);
-
-  // Error handler
-  bot.catch((err) => {
-    console.error('Bot error:', err);
-  });
-}
-
-/**
- * Main Worker export
- * Handles HTTP requests (webhooks) and scheduled events (cron)
- */
-export default {
-  /**
-   * Handle HTTP requests (Telegram webhook)
-   */
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Check if request is from Telegram
-    const url = new URL(request.url);
-
-    // Health check endpoint
-    if (url.pathname === '/health') {
-      return new Response('OK', { status: 200 });
-    }
-
-    // Webhook endpoint
-    if (url.pathname === '/' || url.pathname === '/webhook') {
-      try {
-        // Create bot instance
-        const bot = createBot(env.BOT_TOKEN, env);
-
-        // Setup handlers
-        setupBot(bot);
-
-        // Handle webhook
-        const webhookHandler = createWebhookHandler(bot);
-        return await webhookHandler(request);
-      } catch (error) {
-        console.error('Error handling webhook:', error);
-        return new Response('Internal Server Error', { status: 500 });
-      }
-    }
-
-    // Unknown endpoint
-    return new Response('Not Found', { status: 404 });
-  },
-
-  /**
-   * Handle scheduled events (cron triggers)
-   */
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log('[CRON] Scheduled event triggered:', event.cron);
-
-    try {
-      // Determine which cron job to run based on schedule
-      // Note: Cloudflare doesn't pass the cron pattern, so we need to infer it
-
-      // For now, we'll run both jobs on every trigger
-      // In production, you should use different endpoints or time-based logic
-
-      // Check the minute to determine which job to run
-      const now = new Date();
-      const minute = now.getMinutes();
-
-      if (minute % 15 === 0) {
-        // Run session sync every 15 minutes
-        console.log('[CRON] Running session sync...');
-        await syncSessions(env);
-
-        // Run sources cache refresh every 15 minutes
-        console.log('[CRON] Running sources cache refresh...');
-        await refreshSourcesCache(env);
-      }
-
-      // Run activity polling every minute
-      console.log('[CRON] Running activity polling...');
-      await pollActivities(env);
-
-      console.log('[CRON] Scheduled event complete');
-    } catch (error) {
-      console.error('[CRON] Error in scheduled event:', error);
-    }
-  },
-};
 </file>
 
 <file path=".github/workflows/ci.yml">
@@ -5864,6 +5684,190 @@ jobs:
           echo "- [Full Changelog](https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ steps.get_version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
 </file>
 
+<file path="src/index.ts">
+/**
+ * Jot - Telegram Interface for Jules
+ * Main Cloudflare Worker entry point
+ *
+ * This worker provides a Telegram bot interface for Jules (Google's AI coding assistant)
+ * Features:
+ * - Multi-tenant support (each Telegram group is isolated)
+ * - 1:1 mapping between Telegram topics and Jules sessions
+ * - Automatic activity polling via cron triggers
+ * - Image support (send screenshots/designs to Jules)
+ * - Smart notifications (important events with sound, others silent)
+ * - GitHub links extraction and formatting
+ *
+ * License: AGPL-3.0-or-later
+ */
+
+import { createBot, createWebhookHandler } from './bot/bot';
+import type { BotContext } from './bot/bot';
+import type { Env } from './types/env';
+
+// Import command handlers
+import { handleStart, handleHelp } from './bot/commands/basicCommands';
+import {
+  handleSetJulesToken,
+  handleSetSource,
+  handleSetBranch,
+  handleSetAutoPR,
+  handleRequireApproval,
+} from './bot/commands/configCommands';
+import {
+  handleStatus,
+  handleGetSource,
+  handleListSources,
+  handleSearchSources,
+  handleRefreshSources,
+  handleListSessions,
+  handleSessionInfo,
+  handleListActivities,
+  handleShowPlan,
+  handleShowOutputs,
+  handleOpenJulesSettings,
+} from './bot/commands/infoCommands';
+import {
+  handleNewSession,
+  handleApprovePlan,
+  handleDeleteSession,
+  handleSync,
+} from './bot/commands/actionCommands';
+
+// Import message handlers
+import { handleTextMessage, handlePhotoMessage } from './bot/handlers/messageHandlers';
+import { handleCallbackQuery } from './bot/handlers/callbackHandlers';
+
+// Import cron handlers
+import { pollActivities } from './cron/pollActivities';
+import { syncSessions } from './cron/syncSessions';
+import { refreshSourcesCache } from './cron/refreshSourcesCache';
+
+/**
+ * Setup bot with all command and message handlers
+ */
+function setupBot(bot: ReturnType<typeof createBot>): void {
+  // Basic commands
+  bot.command('start', handleStart);
+  bot.command('help', handleHelp);
+
+  // Configuration commands (admin only)
+  bot.command('set_jules_token', handleSetJulesToken);
+  bot.command('set_source', handleSetSource);
+  bot.command('set_branch', handleSetBranch);
+  bot.command('set_auto_pr', handleSetAutoPR);
+  bot.command('require_approval', handleRequireApproval);
+
+  // Information commands
+  bot.command('status', handleStatus);
+  bot.command('get_source', handleGetSource);
+  bot.command('list_sources', handleListSources);
+  bot.command('search_sources', handleSearchSources);
+  bot.command('refresh_sources', handleRefreshSources);
+  bot.command('list_sessions', handleListSessions);
+  bot.command('session_info', handleSessionInfo);
+  bot.command('list_activities', handleListActivities);
+  bot.command('show_plan', handleShowPlan);
+  bot.command('show_outputs', handleShowOutputs);
+  bot.command('open_jules_settings', handleOpenJulesSettings);
+
+  // Action commands
+  bot.command('new_session', handleNewSession);
+  bot.command('approve_plan', handleApprovePlan);
+  bot.command('delete_session', handleDeleteSession);
+  bot.command('sync', handleSync);
+
+  // Message handlers
+  bot.on('message:text', handleTextMessage);
+  bot.on('message:photo', handlePhotoMessage);
+
+  // Callback query handlers (inline buttons)
+  bot.on('callback_query:data', handleCallbackQuery);
+
+  // Error handler
+  bot.catch((err) => {
+    console.error('Bot error:', err);
+  });
+}
+
+/**
+ * Main Worker export
+ * Handles HTTP requests (webhooks) and scheduled events (cron)
+ */
+export default {
+  /**
+   * Handle HTTP requests (Telegram webhook)
+   */
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Check if request is from Telegram
+    const url = new URL(request.url);
+
+    // Health check endpoint
+    if (url.pathname === '/health') {
+      return new Response('OK', { status: 200 });
+    }
+
+    // Webhook endpoint
+    if (url.pathname === '/' || url.pathname === '/webhook') {
+      try {
+        // Create bot instance with waitUntil support for background tasks
+        const bot = createBot(env.BOT_TOKEN, env, ctx.waitUntil.bind(ctx));
+
+        // Setup handlers
+        setupBot(bot);
+
+        // Handle webhook
+        const webhookHandler = createWebhookHandler(bot);
+        return await webhookHandler(request);
+      } catch (error) {
+        console.error('Error handling webhook:', error);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    }
+
+    // Unknown endpoint
+    return new Response('Not Found', { status: 404 });
+  },
+
+  /**
+   * Handle scheduled events (cron triggers)
+   */
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log('[CRON] Scheduled event triggered:', event.cron);
+
+    try {
+      // Determine which cron job to run based on schedule
+      // Note: Cloudflare doesn't pass the cron pattern, so we need to infer it
+
+      // For now, we'll run both jobs on every trigger
+      // In production, you should use different endpoints or time-based logic
+
+      // Check the minute to determine which job to run
+      const now = new Date();
+      const minute = now.getMinutes();
+
+      if (minute % 15 === 0) {
+        // Run session sync every 15 minutes
+        console.log('[CRON] Running session sync...');
+        await syncSessions(env);
+
+        // Run sources cache refresh every 15 minutes
+        console.log('[CRON] Running sources cache refresh...');
+        await refreshSourcesCache(env);
+      }
+
+      // Run activity polling every minute
+      console.log('[CRON] Running activity polling...');
+      await pollActivities(env);
+
+      console.log('[CRON] Scheduled event complete');
+    } catch (error) {
+      console.error('[CRON] Error in scheduled event:', error);
+    }
+  },
+};
+</file>
+
 <file path=".github/workflows/codeql.yml">
 name: CodeQL Security Analysis
 
@@ -5908,6 +5912,119 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{matrix.language}}"
+</file>
+
+<file path="test/formatters.test.ts">
+/**
+ * Tests for formatter utilities
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  escapeHtml,
+  createExpandableBlockquote,
+  formatBashOutput,
+  truncate,
+} from '../src/utils/formatters';
+
+describe('formatters', () => {
+  describe('escapeHtml', () => {
+    it('should escape HTML special characters', () => {
+      expect(escapeHtml('<div>Hello</div>')).toBe('&lt;div&gt;Hello&lt;/div&gt;');
+      expect(escapeHtml('A & B')).toBe('A &amp; B');
+      expect(escapeHtml('"quoted"')).toBe('&quot;quoted&quot;');
+    });
+
+    it('should handle empty string', () => {
+      expect(escapeHtml('')).toBe('');
+    });
+
+    it('should handle null and undefined gracefully (critical fix)', () => {
+      // This was causing "Cannot read properties of undefined (reading 'replace')"
+      expect(escapeHtml(null)).toBe('');
+      expect(escapeHtml(undefined)).toBe('');
+      // Jules API sometimes returns undefined values
+    });
+  });
+
+  describe('createExpandableBlockquote', () => {
+    it('should create expandable blockquote', () => {
+      const result = createExpandableBlockquote('Title', 'Content');
+      expect(result).toContain('<b>Title</b>');
+      expect(result).toContain('<blockquote expandable>Content</blockquote>');
+    });
+
+    it('should escape HTML in title and content', () => {
+      const result = createExpandableBlockquote('<title>', '<content>');
+      expect(result).toContain('&lt;title&gt;');
+      expect(result).toContain('&lt;content&gt;');
+    });
+  });
+
+  describe('formatBashOutput', () => {
+    it('should format short output inline', () => {
+      const result = formatBashOutput('ls -la', 'file1.txt\nfile2.txt', 0);
+      expect(result).toContain('🔧');
+      expect(result).toContain('<code>ls -la</code>');
+      expect(result).toContain('<pre>file1.txt');
+    });
+
+    it('should use expandable blockquote for long output', () => {
+      const longOutput = 'line\n'.repeat(50);
+      const result = formatBashOutput('npm install', longOutput, 0);
+      expect(result).toContain('<blockquote expandable>');
+    });
+
+    it('should show warning icon for non-zero exit code', () => {
+      const result = formatBashOutput('npm test', 'Tests failed', 1);
+      expect(result).toContain('⚠️');
+      expect(result).toContain('(exit code: 1)');
+    });
+  });
+
+  describe('truncate', () => {
+    it('should truncate long text', () => {
+      const result = truncate('Hello World', 8);
+      expect(result).toBe('Hello...');
+    });
+
+    it('should not truncate short text', () => {
+      const result = truncate('Hello', 10);
+      expect(result).toBe('Hello');
+    });
+  });
+});
+</file>
+
+<file path="wrangler.toml">
+name = "jules-over-telegram"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers Paid plan required for cron triggers
+# Free plan: 100,000 requests/day
+# Paid plan: 10 million requests/month + $0.50 per additional million
+
+# KV Namespace for multi-tenant storage
+# Preview environment will use a separate KV namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "106406036996474b9497d9fdeaa96780"
+preview_id = "e80c6e500c4549ca966201d288e9eaba"
+
+# Cron Triggers for automatic polling
+# Note: Cron triggers require Workers Paid plan
+[triggers]
+crons = [
+  "*/1 * * * *",   # Poll activities every 1 minute
+  "*/15 * * * *"   # Sync sessions every 15 minutes
+]
+
+# Environment variables (use wrangler secret for sensitive data)
+# Set BOT_TOKEN with: wrangler secret put BOT_TOKEN
+[vars]
+ENVIRONMENT = "production"
 </file>
 
 <file path="src/kv/storage.ts">
@@ -6237,119 +6354,6 @@ function hashToken(token: string): string {
   }
   return Math.abs(hash).toString(36);
 }
-</file>
-
-<file path="test/formatters.test.ts">
-/**
- * Tests for formatter utilities
- */
-
-import { describe, it, expect } from 'vitest';
-import {
-  escapeHtml,
-  createExpandableBlockquote,
-  formatBashOutput,
-  truncate,
-} from '../src/utils/formatters';
-
-describe('formatters', () => {
-  describe('escapeHtml', () => {
-    it('should escape HTML special characters', () => {
-      expect(escapeHtml('<div>Hello</div>')).toBe('&lt;div&gt;Hello&lt;/div&gt;');
-      expect(escapeHtml('A & B')).toBe('A &amp; B');
-      expect(escapeHtml('"quoted"')).toBe('&quot;quoted&quot;');
-    });
-
-    it('should handle empty string', () => {
-      expect(escapeHtml('')).toBe('');
-    });
-
-    it('should handle null and undefined gracefully (critical fix)', () => {
-      // This was causing "Cannot read properties of undefined (reading 'replace')"
-      expect(escapeHtml(null)).toBe('');
-      expect(escapeHtml(undefined)).toBe('');
-      // Jules API sometimes returns undefined values
-    });
-  });
-
-  describe('createExpandableBlockquote', () => {
-    it('should create expandable blockquote', () => {
-      const result = createExpandableBlockquote('Title', 'Content');
-      expect(result).toContain('<b>Title</b>');
-      expect(result).toContain('<blockquote expandable>Content</blockquote>');
-    });
-
-    it('should escape HTML in title and content', () => {
-      const result = createExpandableBlockquote('<title>', '<content>');
-      expect(result).toContain('&lt;title&gt;');
-      expect(result).toContain('&lt;content&gt;');
-    });
-  });
-
-  describe('formatBashOutput', () => {
-    it('should format short output inline', () => {
-      const result = formatBashOutput('ls -la', 'file1.txt\nfile2.txt', 0);
-      expect(result).toContain('🔧');
-      expect(result).toContain('<code>ls -la</code>');
-      expect(result).toContain('<pre>file1.txt');
-    });
-
-    it('should use expandable blockquote for long output', () => {
-      const longOutput = 'line\n'.repeat(50);
-      const result = formatBashOutput('npm install', longOutput, 0);
-      expect(result).toContain('<blockquote expandable>');
-    });
-
-    it('should show warning icon for non-zero exit code', () => {
-      const result = formatBashOutput('npm test', 'Tests failed', 1);
-      expect(result).toContain('⚠️');
-      expect(result).toContain('(exit code: 1)');
-    });
-  });
-
-  describe('truncate', () => {
-    it('should truncate long text', () => {
-      const result = truncate('Hello World', 8);
-      expect(result).toBe('Hello...');
-    });
-
-    it('should not truncate short text', () => {
-      const result = truncate('Hello', 10);
-      expect(result).toBe('Hello');
-    });
-  });
-});
-</file>
-
-<file path="wrangler.toml">
-name = "jules-over-telegram"
-main = "src/index.ts"
-compatibility_date = "2024-11-01"
-compatibility_flags = ["nodejs_compat"]
-
-# Workers Paid plan required for cron triggers
-# Free plan: 100,000 requests/day
-# Paid plan: 10 million requests/month + $0.50 per additional million
-
-# KV Namespace for multi-tenant storage
-# Preview environment will use a separate KV namespace
-[[kv_namespaces]]
-binding = "KV"
-id = "106406036996474b9497d9fdeaa96780"
-preview_id = "e80c6e500c4549ca966201d288e9eaba"
-
-# Cron Triggers for automatic polling
-# Note: Cron triggers require Workers Paid plan
-[triggers]
-crons = [
-  "*/1 * * * *",   # Poll activities every 1 minute
-  "*/15 * * * *"   # Sync sessions every 15 minutes
-]
-
-# Environment variables (use wrangler secret for sensitive data)
-# Set BOT_TOKEN with: wrangler secret put BOT_TOKEN
-[vars]
-ENVIRONMENT = "production"
 </file>
 
 <file path="src/utils/formatters.ts">
@@ -7748,6 +7752,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 /**
  * /refresh_sources command
  * Manually refresh the sources cache to fetch all available sources
+ * Uses background processing to avoid Worker timeout (10s limit)
  */
 export async function handleRefreshSources(ctx: BotContext): Promise<void> {
   const groupId = getGroupId(ctx);
@@ -7768,33 +7773,44 @@ export async function handleRefreshSources(ctx: BotContext): Promise<void> {
     return;
   }
 
-  await ctx.reply('🔄 Refreshing sources cache... This may take a minute.');
-
   try {
     // Register token as active for cron refresh
-    const { registerActiveToken } = await import('../../kv/storage');
+    const { registerActiveToken, clearSourcesCache } = await import('../../kv/storage');
     await registerActiveToken(ctx.env, token);
 
-    // Import and use the refresh function
-    const { refreshSourcesForToken } = await import('../../cron/refreshSourcesCache');
-    const result = await refreshSourcesForToken(ctx.env, token);
+    // Clear current cache to force fresh fetch
+    await clearSourcesCache(ctx.env, token);
 
-    if (result.count === 0) {
-      await ctx.reply('❌ Failed to refresh sources. Please try again later.');
-      return;
-    }
-
+    // Respond immediately to avoid timeout
     await ctx.reply(
-      `✅ <b>Sources cache refreshed!</b>\n\n` +
-      `📦 Found <b>${result.count}</b> sources${result.hasMore ? '+' : ''}\n` +
-      `${result.hasMore ? '⚠️ Note: Limited to 1000 sources max\n\n' : '\n'}` +
-      `Use /list_sources or /search_sources to browse.`,
+      '🔄 <b>Sources cache refresh started!</b>\n\n' +
+      '⏱️ This process will fetch all your repositories in the background.\n\n' +
+      '💡 The cron job will complete the refresh within 15 minutes.\n' +
+      'Use /list_sources in 1-2 minutes to see updated sources.',
       { parse_mode: 'HTML' }
     );
+
+    // Try to do partial refresh in background (3 pages max = 300 sources)
+    // This may or may not complete depending on Worker lifecycle
+    if (ctx.waitUntil) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            console.log('[refresh_sources] Starting background partial refresh...');
+            const { refreshSourcesForToken } = await import('../../cron/refreshSourcesCache');
+            // Limit to 3 pages to fit in Worker extended time
+            const result = await refreshSourcesForToken(ctx.env, token, 3);
+            console.log(`[refresh_sources] Background refresh: ${result.count} sources (hasMore: ${result.hasMore})`);
+          } catch (error) {
+            console.error('[refresh_sources] Background refresh error:', error);
+          }
+        })()
+      );
+    }
   } catch (error) {
-    console.error('Error refreshing sources:', error);
+    console.error('Error initiating refresh:', error);
     await ctx.reply(
-      '❌ Failed to refresh sources.\n\n' +
+      '❌ Failed to initiate refresh.\n\n' +
       'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
     );
   }
@@ -9063,501 +9079,214 @@ export function isSessionNotFoundError(error: Error): boolean {
 
 <git_diffs>
 <git_diff_work_tree>
-src/bot/commands/infoCommands.ts --- 1/3 --- TypeScript
-114 
-115   try {
-116     // Try to get from cache first
-117     const { getSourcesCache, setSourcesCache, registerActiveToken } = await import('../../kv/storage');
-118     let sources = await getSourcesCache(ctx.env, token);
-119     let hasMore = false;
-120 
+src/bot/bot.ts --- TypeScript
+11  */                                  11  */
+12 export interface BotContext extends  12 export interface BotContext extends 
+.. Context {                            .. Context {
+13   env: Env;                          13   env: Env;
+..                                      14   waitUntil?: ExecutionContext['wait
+..                                      .. Until'];
+14 }                                    15 }
+15                                      16 
+16 /**                                  17 /**
+17  * Create and configure bot instance 18  * Create and configure bot instance
+18  * Uses botInfo pre-configuration to 19  * Uses botInfo pre-configuration to
+..  avoid unnecessary getMe calls       ..  avoid unnecessary getMe calls
+19  */                                  20  */
+20 export function createBot(botToken:  21 export function createBot(botToken: 
+.. string, env: Env): Bot<BotContext> { .. string, env: Env, waitUntil?: Execut
+..                                      .. ionContext['waitUntil']): Bot<BotCon
+..                                      .. text> {
+21   const bot = new Bot<BotContext>(bo 22   const bot = new Bot<BotContext>(bo
+.. tToken);                             .. tToken);
+22                                      23 
+23   // Attach env to context for all h 24   // Attach env and waitUntil to con
+.. andlers                              .. text for all handlers
+24   bot.use(async (ctx, next) => {     25   bot.use(async (ctx, next) => {
+25     ctx.env = env;                   26     ctx.env = env;
+..                                      27     ctx.waitUntil = waitUntil;
+26     await next();                    28     await next();
+27   });                                29   });
+28                                      30 
 
-src/bot/commands/infoCommands.ts --- 2/3 --- TypeScript
-141       // Cache the initial results  141       // Cache the initial results 
-... for 1 hour                          ... for 1 hour
-142       await setSourcesCache(ctx.env 142       await setSourcesCache(ctx.env
-... , token, sources);                  ... , token, sources);
-143                                     143 
-...                                     144       // Register token as active f
-...                                     ... or cron refresh
-144       console.log(`[DEBUG] Cached $ 145       await registerActiveToken(ctx
-... {sources.length} sources (hasMore:  ... .env, token);
-... ${hasMore})`);                      ... 
-145                                     146 
-146       // If there are more sources, ... 
-...  start background fetch to get them ... 
-...  all                                ... 
-147       if (hasMore) {                ... 
-148         console.log('[DEBUG] More s 147       console.log(`[DEBUG] Cached $
-... ources available, will fetch in bac ... {sources.length} sources (hasMore: 
-... kground...');                       ... ${hasMore})`);
-149         // Don't await - let it run ... 
-...  in background                      ... 
-150         fetchAllSourcesInBackground ... 
-... (ctx.env, token).catch(error => {   ... 
-151           console.error('[DEBUG] Ba ... 
-... ckground fetch error:', error);     ... 
-152         });                         ... 
-153       }                             ... 
-154     }                               148     }
-155                                     149 
-156     // Show first page (10 sources  150     // Show first page (10 sources 
-    per page)                               per page)
+src/bot/commands/infoCommands.ts --- 1/2 --- TypeScript
+159   }                                 159   }
+160 }                                   160 }
+161                                     161 
+162 /**                                 162 /**
+163  * /refresh_sources command         163  * /refresh_sources command
+164  * Manually refresh the sources cac 164  * Manually refresh the sources cac
+... he to fetch all available sources   ... he to fetch all available sources
+165  */                                 165  * Uses background processing to av
+...                                     ... oid Worker timeout (10s limit)
+...                                     166  */
+166 export async function handleRefresh 167 export async function handleRefresh
+... Sources(ctx: BotContext): Promise<v ... Sources(ctx: BotContext): Promise<v
+... oid> {                              ... oid> {
+167   const groupId = getGroupId(ctx);  168   const groupId = getGroupId(ctx);
+168                                     169 
 
-src/bot/commands/infoCommands.ts --- 3/3 --- TypeScript
-165   }                                 159   }
-166 }                                   160 }
-167                                     161 
-168 /**                                 162 /**
-169  * Fetch all sources in background  163  * /refresh_sources command
-... without timeout limit               ... 
-170  * Updates cache progressively as p 164  * Manually refresh the sources cac
-... ages are fetched                    ... he to fetch all available sources
-171  */                                 165  */
-172 async function fetchAllSourcesInBac 166 export async function handleRefresh
-... kground(env: any, token: string): P ... Sources(ctx: BotContext): Promise<v
-... romise<void> {                      ... oid> {
-173   console.log('[fetchAllSourcesInBa 167   const groupId = getGroupId(ctx);
-... ckground] Starting full fetch...'); ... 
-...                                     168 
-...                                     169   if (!groupId) {
-174   const startTime = Date.now();     170     await ctx.reply('This command o
-...                                     ... nly works in group chats.');
-175                                     171     return;
-176   try {                             172   }
-...                                     173 
-177     const julesClient = createJules 174   const token = await getJulesToken
-... Client(token);                      ... (ctx.env, groupId);
-...                                     175 
-...                                     176   if (!token) {
-...                                     177     await ctx.reply(
-...                                     178       '⚠️ Jules token not configured
-...                                     ... .\n\n' +
-...                                     179       'Use /set_jules_token &lt;tok
-...                                     ... en&gt; to get started.',
-178     const allSources: any[] = [];   180       { parse_mode: 'HTML' }
-...                                     181     );
-...                                     182     return;
-...                                     183   }
-...                                     184 
-179     let nextPageToken: string | und 185   await ctx.reply('🔄 Refreshing so
-... efined;                             ... urces cache... This may take a minu
-...                                     ... te.');
-180     let pageNum = 0;                186 
-...                                     187   try {
-...                                     188     // Register token as active for
-...                                     ...  cron refresh
-181     const pageSize = 100;           189     const { registerActiveToken } =
-...                                     ...  await import('../../kv/storage');
-182                                     190     await registerActiveToken(ctx.e
-...                                     ... nv, token);
-183     do {                            191 
-184       pageNum++;                    192     // Import and use the refresh f
-...                                     ... unction
-185       const url = nextPageToken     193     const { refreshSourcesForToken 
-...                                     ... } = await import('../../cron/refres
-...                                     ... hSourcesCache');
-186         ? `/sources?pageSize=${page ... 
-... Size}&pageToken=${encodeURIComponen ... 
-... t(nextPageToken)}`                  ... 
-187         : `/sources?pageSize=${page ... 
-... Size}`;                             ... 
-188                                     ... 
-189       console.log(`[fetchAllSources ... 
-... InBackground] Fetching page ${pageN ... 
-... um}...`);                           ... 
-190                                     ... 
-191       const response = await fetch( 194     const result = await refreshSou
-... `https://jules.googleapis.com/v1alp ... rcesForToken(ctx.env, token);
-... ha${url}`, {                        ... 
-192         headers: {                  ... 
-193           'X-Goog-Api-Key': token,  ... 
-194           'Content-Type': 'applicat ... 
-... ion/json',                          ... 
-195         },                          ... 
-196       });                           ... 
-197                                     195 
-198       if (!response.ok) {           196     if (result.count === 0) {
-199         console.error(`[fetchAllSou 197       await ctx.reply('❌ Failed to
-... rcesInBackground] API error: ${resp ...  refresh sources. Please try again 
-... onse.status}`);                     ... later.');
-200         break;                      198       return;
-201       }                             199     }
-202                                     200 
-203       const data: any = await respo ... 
-... nse.json();                         ... 
-204                                     ... 
-205       if (data.sources && data.sour ... 
-... ces.length > 0) {                   ... 
-206         const mapped = data.sources 201     await ctx.reply(
-... .map((s: any) => ({                 ... 
-207           name: s.name,             202       `✅ <b>Sources cache refreshe
-...                                     ... d!</b>\n\n` +
-208           displayName: s.displayNam 203       `📦 Found <b>${result.count}<
-... e,                                  ... /b> sources${result.hasMore ? '+' :
-...                                     ...  ''}\n` +
-...                                     204       `${result.hasMore ? '⚠️ Note: 
-...                                     ... Limited to 1000 sources max\n\n' : 
-...                                     ... '\n'}` +
-...                                     205       `Use /list_sources or /search
-...                                     ... _sources to browse.`,
-209           description: s.descriptio 206       { parse_mode: 'HTML' }
-... n,                                  ... 
-210         }));                        207     );
-211         allSources.push(...mapped); ... 
-212                                     ... 
-213         console.log(`[fetchAllSourc ... 
-... esInBackground] Page ${pageNum}: +$ ... 
-... {data.sources.length} sources (tota ... 
-... l: ${allSources.length})`);         ... 
-214                                     ... 
-215         // Update cache after each  ... 
-... page                                ... 
-216         const { setSourcesCache } = ... 
-...  await import('../../kv/storage');  ... 
-217         await setSourcesCache(env,  ... 
-... token, allSources);                 ... 
-218       }                             ... 
-219                                     ... 
-220       nextPageToken = data.nextPage ... 
-... Token;                              ... 
-221                                     ... 
-222       // Safety limit: max 10 pages ... 
-...  (1000 sources)                     ... 
-223       if (pageNum >= 10) {          ... 
-224         console.log('[fetchAllSourc ... 
-... esInBackground] Reached page limit  ... 
-... (10)');                             ... 
-225         break;                      ... 
-226       }                             ... 
-227     } while (nextPageToken);        ... 
-228                                     ... 
-229     const duration = Date.now() - s ... 
-... tartTime;                           ... 
-230     console.log(`[fetchAllSourcesIn ... 
-... Background] Complete: ${allSources. ... 
-... length} sources in ${duration}ms ($ ... 
-... {pageNum} pages)`);                 ... 
-231   } catch (error) {                 208   } catch (error) {
-232     console.error('[fetchAllSources 209     console.error('Error refreshing
-... InBackground] Error:', error);      ...  sources:', error);
-...                                     210     await ctx.reply(
-...                                     211       '❌ Failed to refresh sources
-...                                     ... .\n\n' +
-...                                     212       'Error: ' + (error instanceof
-...                                     ...  Error ? error.message : 'Unknown e
-...                                     ... rror')
-...                                     213     );
-233   }                                 214   }
-234 }                                   215 }
-235                                     216 
+src/bot/commands/infoCommands.ts --- 2/2 --- TypeScript
+182     return;                         183     return;
+183   }                                 184   }
+184                                     ... 
+185   await ctx.reply('🔄 Refreshing so ... 
+... urces cache... This may take a minu ... 
+... te.');                              ... 
+186                                     185 
+187   try {                             186   try {
+188     // Register token as active for 187     // Register token as active for
+...  cron refresh                       ...  cron refresh
+189     const { registerActiveToken } = 188     const { registerActiveToken, cl
+...  await import('../../kv/storage');  ... earSourcesCache } = await import('.
+...                                     ... ./../kv/storage');
+190     await registerActiveToken(ctx.e 189     await registerActiveToken(ctx.e
+... nv, token);                         ... nv, token);
+191                                     190 
+192     // Import and use the refresh f 191     // Clear current cache to force
+... unction                             ...  fresh fetch
+...                                     192     await clearSourcesCache(ctx.env
+...                                     ... , token);
+...                                     193 
+...                                     194     // Respond immediately to avoid
+...                                     ...  timeout
+...                                     195     await ctx.reply(
+...                                     196       '🔄 <b>Sources cache refresh 
+...                                     ... started!</b>\n\n' +
+...                                     197       '⏱️ This process will fetch al
+...                                     ... l your repositories in the backgrou
+...                                     ... nd.\n\n' +
+...                                     198       '💡 The cron job will complet
+...                                     ... e the refresh within 15 minutes.\n'
+...                                     ...  +
+...                                     199       'Use /list_sources in 1-2 min
+...                                     ... utes to see updated sources.',
+...                                     200       { parse_mode: 'HTML' }
+...                                     201     );
+...                                     202 
+...                                     203     // Try to do partial refresh in
+...                                     ...  background (3 pages max = 300 sour
+...                                     ... ces)
+...                                     204     // This may or may not complete
+...                                     ...  depending on Worker lifecycle
+...                                     205     if (ctx.waitUntil) {
+...                                     206       ctx.waitUntil(
+...                                     207         (async () => {
+...                                     208           try {
+...                                     209             console.log('[refresh_s
+...                                     ... ources] Starting background partial
+...                                     ...  refresh...');
+193     const { refreshSourcesForToken  210             const { refreshSourcesF
+... } = await import('../../cron/refres ... orToken } = await import('../../cro
+... hSourcesCache');                    ... n/refreshSourcesCache');
+...                                     211             // Limit to 3 pages to 
+...                                     ... fit in Worker extended time
+194     const result = await refreshSou 212             const result = await re
+... rcesForToken(ctx.env, token);       ... freshSourcesForToken(ctx.env, token
+...                                     ... , 3);
+195                                     ... 
+196     if (result.count === 0) {       ... 
+197       await ctx.reply('❌ Failed to 213             console.log(`[refresh_s
+...  refresh sources. Please try again  ... ources] Background refresh: ${resul
+... later.');                           ... t.count} sources (hasMore: ${result
+...                                     ... .hasMore})`);
+198       return;                       214           } catch (error) {
+199     }                               ... 
+200                                     ... 
+201     await ctx.reply(                215             console.error('[refresh
+...                                     ... _sources] Background refresh error:
+...                                     ... ', error);
+202       `✅ <b>Sources cache refreshe 216           }
+... d!</b>\n\n` +                       ... 
+203       `📦 Found <b>${result.count}< 217         })()
+... /b> sources${result.hasMore ? '+' : ... 
+...  ''}\n` +                           ... 
+204       `${result.hasMore ? '⚠️ Note:  218       );
+... Limited to 1000 sources max\n\n' :  ... 
+... '\n'}` +                            ... 
+205       `Use /list_sources or /search 219     }
+... _sources to browse.`,               ... 
+206       { parse_mode: 'HTML' }        ... 
+207     );                              ... 
+208   } catch (error) {                 220   } catch (error) {
+209     console.error('Error refreshing 221     console.error('Error initiating
+...  sources:', error);                 ...  refresh:', error);
+210     await ctx.reply(                222     await ctx.reply(
+211       '❌ Failed to refresh sources 223       '❌ Failed to initiate refres
+... .\n\n' +                            ... h.\n\n' +
+212       'Error: ' + (error instanceof 224       'Error: ' + (error instanceof
+...  Error ? error.message : 'Unknown e ...  Error ? error.message : 'Unknown e
+... rror')                              ... rror')
+213     );                              225     );
+214   }                                 226   }
 
-src/bot/handlers/callbackHandlers.ts --- TypeScript
-403   let message = `<b>📚 Available So 403   let message = `<b>📚 Available So
-... urces (${sources.length}${hasMore ? ... urces (${sources.length}${hasMore ?
-...  '+' : ''} total)</b>\n\n`;         ...  '+' : ''} total)</b>\n\n`;
-404   message += `<i>Page ${page + 1} o 404   message += `<i>Page ${page + 1} o
-... f ${totalPages}</i>\n\n`;           ... f ${totalPages}</i>\n\n`;
-405   if (hasMore) {                    405   if (hasMore) {
-406     message += `<i>⏳ Loading more  406     message += `<i>⚠️ Showing first 
-... sources in background... Use /list_ ... ${sources.length} sources only. Use
-... sources again in a few seconds to s ...  /refresh_sources to load all sourc
-... ee all.</i>\n\n`;                   ... es (may take ~1 minute).</i>\n\n`;
-407   }                                 407   }
-408   message += `<i>Tap a source to se 408   message += `<i>Tap a source to se
-... lect it as default</i>\n\n`;        ... lect it as default</i>\n\n`;
-409                                     409 
+src/cron/refreshSourcesCache.ts --- 1/3 --- TypeScript
+ 8 import { createJulesClient } from '.  8 import { createJulesClient } from '.
+ . ./jules/api';                         . ./jules/api';
+ 9 import { setSourcesCache } from '../  9 import { setSourcesCache } from '../
+ . kv/storage';                          . kv/storage';
+10                                      10 
+11 /**                                  11 /**
+12  * Fetch all sources for a token and 12  * Fetch all sources for a token and
+..  update cache                        ..  update cache
+13  * Takes longer but gets complete li 13  * Takes longer but gets complete li
+.. st (up to 1000 sources = 10 pages)   .. st (up to 1000 sources = 10 pages)
+14  */                                  14  * @param env - Cloudflare Worker en
+..                                      .. vironment
+..                                      15  * @param token - Jules API token
+..                                      16  * @param maxPages - Maximum number 
+..                                      .. of pages to fetch (default: 10 = 100
+..                                      .. 0 sources)
+..                                      17  */
+15 export async function refreshSources 18 export async function refreshSources
+.. ForToken(env: Env, token: string): P .. ForToken(env: Env, token: string, ma
+.. romise<{ count: number; hasMore: boo .. xPages: number = 10): Promise<{ coun
+.. lean }> {                            .. t: number; hasMore: boolean }> {
+16   console.log('[refreshSourcesCache] 19   console.log(`[refreshSourcesCache]
+..  Starting full sources fetch...');   ..  Starting sources fetch (max ${maxPa
+..                                      .. ges} pages)...`);
+17   const startTime = Date.now();      20   const startTime = Date.now();
+18                                      21 
+19   try {                              22   try {
 
-src/cron/refreshSourcesCache.ts --- TypeScript
- 8 import { createJulesClient } from '.   8 import { createJulesClient } from '.
- . ./jules/api';                          . ./jules/api';
- 9 import { setSourcesCache } from '../   9 import { setSourcesCache } from '../
- . kv/storage';                           . kv/storage';
-10                                       10 
-11 /**                                   11 /**
-12  * Fetch all sources for a token and  12  * Fetch all sources for a token and
-..  update cache                         ..  update cache
-13  * Takes longer but gets complete li  13  * Takes longer but gets complete li
-.. st                                    .. st (up to 1000 sources = 10 pages)
-14  */                                   14  */
-15 async function refreshSourcesForToke  15 export async function refreshSources
-.. n(env: Env, token: string): Promise<  .. ForToken(env: Env, token: string): P
-.. number> {                             .. romise<{ count: number; hasMore: boo
-..                                       .. lean }> {
-16   console.log('[refreshSourcesCache]  16   console.log('[refreshSourcesCache]
-..  Fetching sources for token...');     ..  Starting full sources fetch...');
-17   const startTime = Date.now();       17   const startTime = Date.now();
-18                                       18 
-19   try {                               19   try {
-20     const julesClient = createJulesC  20     const julesClient = createJulesC
-.. lient(token);                         .. lient(token);
-21                                       21     const allSources: any[] = [];
-22     // Use extended timeout for cron  22     let nextPageToken: string | unde
-..  job (we have more time)              .. fined;
-23     // Fetch with 9s timeout to get   23     let pageNum = 0;
-.. as many as possible                   .. 
-..                                       24     const pageSize = 100;
-..                                       25     const maxPages = 10; // Limit to
-..                                       ..  1000 sources max
-..                                       26 
-..                                       27     // Fetch all pages
-..                                       28     do {
-..                                       29       pageNum++;
-..                                       30       let url = `/sources?pageSize=$
-..                                       .. {pageSize}`;
-..                                       31       if (nextPageToken) {
-..                                       32         url += `&pageToken=${encodeU
-..                                       .. RIComponent(nextPageToken)}`;
-..                                       33       }
-..                                       34 
-..                                       35       console.log(`[refreshSourcesCa
-..                                       .. che] Fetching page ${pageNum}...`);
-..                                       36 
-..                                       37       // Direct API call without tim
-..                                       .. eout since we have more time in cron
-..                                       .. /manual refresh
-24     const result = await julesClient  38       const response = await fetch(`
-.. .listSources(9000);                   .. https://jules.googleapis.com/v1alpha
-..                                       .. ${url}`, {
-..                                       39         headers: {
-..                                       40           'X-Goog-Api-Key': token,
-..                                       41           'Content-Type': 'applicati
-..                                       .. on/json',
-..                                       42         },
-..                                       43       });
-25                                       44 
-26     if (result.sources.length === 0)  45       if (!response.ok) {
-..  {                                    .. 
-27       console.log('[refreshSourcesCa  46         console.error(`[refreshSourc
-.. che] No sources found');              .. esCache] API error: ${response.statu
-..                                       .. s}`);
-28       return 0;                       47         break;
-29     }                                 48       }
-30                                       49 
-31     // Map to cache format            50       const data: any = await respon
-..                                       .. se.json();
-..                                       51 
-..                                       52       if (data.sources && data.sourc
-..                                       .. es.length > 0) {
-32     const sources = result.sources.m  53         const mapped = data.sources.
-.. ap(s => ({                            .. map((s: any) => ({
-33       name: s.name,                   54           name: s.name,
-34       displayName: s.displayName,     55           displayName: s.displayName
-..                                       .. ,
-35       description: s.description,     56           description: s.description
-..                                       .. ,
-36     }));                              57         }));
-..                                       58         allSources.push(...mapped);
-..                                       59 
-..                                       60         console.log(`[refreshSources
-..                                       .. Cache] Page ${pageNum}: +${data.sour
-..                                       .. ces.length} sources (total: ${allSou
-..                                       .. rces.length})`);
-..                                       61       }
-..                                       62 
-..                                       63       nextPageToken = data.nextPageT
-..                                       .. oken;
-..                                       64 
-..                                       65       // Safety limit: max 10 pages 
-..                                       .. (1000 sources)
-..                                       66       if (pageNum >= maxPages) {
-..                                       67         console.log('[refreshSources
-..                                       .. Cache] Reached page limit (10)');
-..                                       68         break;
-..                                       69       }
-..                                       70     } while (nextPageToken);
-37                                       71 
-38     // Update cache (1 hour TTL)      72     // Update cache (1 hour TTL)
-..                                       73     if (allSources.length > 0) {
-39     await setSourcesCache(env, token  74       await setSourcesCache(env, tok
-.. , sources);                           .. en, allSources);
-..                                       75     }
-40                                       76 
-41     const duration = Date.now() - st  77     const duration = Date.now() - st
-.. artTime;                              .. artTime;
-..                                       78     const hasMore = !!nextPageToken;
-42     console.log(`[refreshSourcesCach  79     console.log(`[refreshSourcesCach
-.. e] Cached ${sources.length} sources   .. e] Complete: ${allSources.length} so
-.. in ${duration}ms (hasMore: ${result.  .. urces in ${duration}ms (${pageNum} p
-.. hasMore})`);                          .. ages, hasMore: ${hasMore})`);
-43                                       80 
-44     return sources.length;            81     return { count: allSources.lengt
-..                                       .. h, hasMore };
-45   } catch (error) {                   82   } catch (error) {
-46     console.error('[refreshSourcesCa  83     console.error('[refreshSourcesCa
-.. che] Error fetching sources:', error  .. che] Error fetching sources:', error
-.. );                                    .. );
-47     return 0;                         84     return { count: 0, hasMore: fals
-..                                       .. e };
-48   }                                   85   }
-49 }                                     86 }
-50                                       87 
-51 /**                                   88 /**
-52  * Main cron handler                  89  * Main cron handler
-53  * Refreshes sources cache for all g  90  * Refreshes sources cache for all a
-.. roups that have tokens                .. ctive tokens (tokens used in last 2 
-..                                       .. hours)
-54  */                                   91  */
-55 export async function refreshSources  92 export async function refreshSources
-.. Cache(env: Env): Promise<void> {      .. Cache(env: Env): Promise<void> {
-56   console.log('[refreshSourcesCache]  93   console.log('[refreshSourcesCache]
-..  Starting sources cache refresh...')  ..  Starting sources cache refresh cron
-.. ;                                     .. ...');
-57   const startTime = Date.now();       94   const startTime = Date.now();
-58                                       95 
-59   try {                               96   try {
-60     // Get all unique tokens from KV  97     // Get all active tokens from re
-..                                       .. gistry
-61     // Note: In a production system,  98     const { getActiveTokens } = awai
-..  you'd want to keep a registry of ac  .. t import('../kv/storage');
-.. tive tokens                           .. 
-62     // For now, this will only refre  99     const tokens = await getActiveTo
-.. sh when groups actively use the bot   .. kens(env);
-63                                      100 
-64     // Since we don't have a token r 101     if (tokens.length === 0) {
-.. egistry, this cron will be triggered ... 
-65     // whenever /list_sources or /se 102       console.log('[refreshSourcesCa
-.. arch_sources is used, and will refre ... che] No active tokens to refresh');
-.. sh                                   ... 
-66     // the cache in the background   103       return;
-..                                      104     }
-..                                      105 
-..                                      106     console.log(`[refreshSourcesCach
-..                                      ... e] Found ${tokens.length} active tok
-..                                      ... ens to refresh`);
-..                                      107 
-..                                      108     // Refresh each token's sources 
-..                                      ... cache
-..                                      109     let successCount = 0;
-..                                      110     let errorCount = 0;
-..                                      111 
-..                                      112     for (const token of tokens) {
-..                                      113       try {
-..                                      114         const result = await refresh
-..                                      ... SourcesForToken(env, token);
-..                                      115         if (result.count > 0) {
-..                                      116           successCount++;
-..                                      117           console.log(`[refreshSourc
-..                                      ... esCache] ✓ Refreshed token: ${result
-..                                      ... .count} sources`);
-..                                      118         } else {
-..                                      119           errorCount++;
-..                                      120           console.log(`[refreshSourc
-..                                      ... esCache] ✗ Failed to refresh token`)
-..                                      ... ;
-..                                      121         }
-..                                      122       } catch (error) {
-..                                      123         errorCount++;
-..                                      124         console.error(`[refreshSourc
-..                                      ... esCache] ✗ Error refreshing token:`,
-..                                      ...  error);
-..                                      125       }
-..                                      126     }
-67                                      127 
-68     const duration = Date.now() - st 128     const duration = Date.now() - st
-.. artTime;                             ... artTime;
-69     console.log(`[refreshSourcesCach 129     console.log(`[refreshSourcesCach
-.. e] Cache refresh complete in ${durat ... e] Complete: ${successCount} success
-.. ion}ms`);                            ... , ${errorCount} errors in ${duration
-..                                      ... }ms`);
-70   } catch (error) {                  130   } catch (error) {
-71     console.error('[refreshSourcesCa 131     console.error('[refreshSourcesCa
-.. che] Error in cache refresh:', error ... che] Error in cache refresh cron:', 
-.. );                                   ... error);
-72   }                                  132   }
-73 }                                    133 }
+src/cron/refreshSourcesCache.ts --- 2/3 --- TypeScript
+22 25     let nextPageToken: string | undefined;
+23 26     let pageNum = 0;
+24 27     const pageSize = 100;
+25 ..     const maxPages = 10; // Limit to 1000 sources max
+26 28 
+27 29     // Fetch all pages
+28 30     do {
 
-src/index.ts --- 1/4 --- TypeScript
-32 32   handleGetSource,
-33 33   handleListSources,
-34 34   handleSearchSources,
-.. 35   handleRefreshSources,
-35 36   handleListSessions,
-36 37   handleSessionInfo,
-37 38   handleListActivities,
+src/cron/refreshSourcesCache.ts --- 3/3 --- TypeScript
+62                                      64 
+63       nextPageToken = data.nextPageT 65       nextPageToken = data.nextPageT
+.. oken;                                .. oken;
+64                                      66 
+65       // Safety limit: max 10 pages  67       // Safety limit to avoid exces
+.. (1000 sources)                       .. sive API calls
+66       if (pageNum >= maxPages) {     68       if (pageNum >= maxPages) {
+67         console.log('[refreshSources 69         console.log(`[refreshSources
+.. Cache] Reached page limit (10)');    .. Cache] Reached page limit (${maxPage
+..                                      .. s})`);
+68         break;                       70         break;
+69       }                              71       }
+70     } while (nextPageToken);         72     } while (nextPageToken);
 
-src/index.ts --- 2/4 --- TypeScript
-53 54 // Import cron handlers
-54 55 import { pollActivities } from './cron/pollActivities';
-55 56 import { syncSessions } from './cron/syncSessions';
-.. 57 import { refreshSourcesCache } from './cron/refreshSourcesCache';
-56 58 
-57 59 /**
-58 60  * Setup bot with all command and message handlers
-
-src/index.ts --- 3/4 --- TypeScript
-74 76   bot.command('get_source', handleGetSource);
-75 77   bot.command('list_sources', handleListSources);
-76 78   bot.command('search_sources', handleSearchSources);
-.. 79   bot.command('refresh_sources', handleRefreshSources);
-77 80   bot.command('list_sessions', handleListSessions);
-78 81   bot.command('session_info', handleSessionInfo);
-79 82   bot.command('list_activities', handleListActivities);
-
-src/index.ts --- 4/4 --- TypeScript
-161 164         console.log('[CRON] Running session sync...');
-162 165         await syncSessions(env);
-... 166 
-... 167         // Run sources cache refresh every 15 minutes
-... 168         console.log('[CRON] Running sources cache refresh...');
-... 169         await refreshSourcesCache(env);
-163 170       }
-164 171 
-165 172       // Run activity polling every minute
-
-src/kv/storage.ts --- TypeScript
-267 267   await env.KV.delete(key);
-268 268 }
-... 269 
-... 270 /**
-... 271  * Register a token as active (for cron refresh)
-... 272  * Stores the token in a registry so the cron job can refresh all active tokens
-... 273  */
-... 274 export async function registerActiveToken(env: Env, token: string): Promise<void> {
-... 275   const key = `registry:active_tokens`;
-... 276 
-... 277   // Get current registry
-... 278   const registryJson = await env.KV.get(key);
-... 279   let registry: string[] = registryJson ? JSON.parse(registryJson) : [];
-... 280 
-... 281   // Add token if not already present
-... 282   const tokenHash = hashToken(token);
-... 283   if (!registry.includes(tokenHash)) {
-... 284     registry.push(tokenHash);
-... 285   }
-... 286 
-... 287   // Store back with 2 hour expiration (longer than cache)
-... 288   await env.KV.put(key, JSON.stringify(registry), { expirationTtl: 7200 });
-... 289 
-... 290   // Also store the actual token (hashed as key) for lookup
-... 291   await env.KV.put(`registry:token:${tokenHash}`, token, { expirationTtl: 7200 });
-... 292 }
-... 293 
-... 294 /**
-... 295  * Get all active tokens for cron refresh
-... 296  */
-... 297 export async function getActiveTokens(env: Env): Promise<string[]> {
-... 298   const key = `registry:active_tokens`;
-... 299   const registryJson = await env.KV.get(key);
-... 300 
-... 301   if (!registryJson) return [];
-... 302 
-... 303   const registry: string[] = JSON.parse(registryJson);
-... 304   const tokens: string[] = [];
-... 305 
-... 306   // Lookup each token from the registry
-... 307   for (const tokenHash of registry) {
-... 308     const token = await env.KV.get(`registry:token:${tokenHash}`);
-... 309     if (token) {
-... 310       tokens.push(token);
-... 311     }
-... 312   }
-... 313 
-... 314   return tokens;
-... 315 }
-269 316 
-270 317 // Simple hash function for token (for cache key)
-271 318 function hashToken(token: string): string {
+src/index.ts --- TypeScript
+123     // Webhook endpoint             123     // Webhook endpoint
+124     if (url.pathname === '/' || url 124     if (url.pathname === '/' || url
+... .pathname === '/webhook') {         ... .pathname === '/webhook') {
+125       try {                         125       try {
+126         // Create bot instance      126         // Create bot instance with
+...                                     ...  waitUntil support for background t
+...                                     ... asks
+127         const bot = createBot(env.B 127         const bot = createBot(env.B
+... OT_TOKEN, env);                     ... OT_TOKEN, env, ctx.waitUntil.bind(c
+...                                     ... tx));
+128                                     128 
+129         // Setup handlers           129         // Setup handlers
+130         setupBot(bot);              130         setupBot(bot);
 
 
 </git_diff_work_tree>
@@ -9567,6 +9296,18 @@ src/kv/storage.ts --- TypeScript
 </git_diffs>
 
 <git_logs>
+<git_log_commit>
+<date>2025-11-17 11:57:56 -0300</date>
+<message>feat: Implement manual and automatic sources cache refresh</message>
+<files>
+repomix-output.xml
+src/bot/commands/infoCommands.ts
+src/bot/handlers/callbackHandlers.ts
+src/cron/refreshSourcesCache.ts
+src/index.ts
+src/kv/storage.ts
+</files>
+</git_log_commit>
 <git_log_commit>
 <date>2025-11-17 04:04:10 -0300</date>
 <message>feat: Implement progressive background fetch for all sources</message>
@@ -9955,13 +9696,6 @@ wrangler.toml
 <files>
 .github/workflows/performance.yml
 .github/workflows/pr-lint.yml
-</files>
-</git_log_commit>
-<git_log_commit>
-<date>2025-11-03 22:39:58 +0000</date>
-<message>ci(deps): Bump codecov/codecov-action from 4 to 5</message>
-<files>
-.github/workflows/ci.yml
 </files>
 </git_log_commit>
 </git_logs>

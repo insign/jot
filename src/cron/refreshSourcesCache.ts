@@ -11,9 +11,12 @@ import { setSourcesCache } from '../kv/storage';
 /**
  * Fetch all sources for a token and update cache
  * Takes longer but gets complete list (up to 1000 sources = 10 pages)
+ * @param env - Cloudflare Worker environment
+ * @param token - Jules API token
+ * @param maxPages - Maximum number of pages to fetch (default: 10 = 1000 sources)
  */
-export async function refreshSourcesForToken(env: Env, token: string): Promise<{ count: number; hasMore: boolean }> {
-  console.log('[refreshSourcesCache] Starting full sources fetch...');
+export async function refreshSourcesForToken(env: Env, token: string, maxPages: number = 10): Promise<{ count: number; hasMore: boolean }> {
+  console.log(`[refreshSourcesCache] Starting sources fetch (max ${maxPages} pages)...`);
   const startTime = Date.now();
 
   try {
@@ -22,7 +25,6 @@ export async function refreshSourcesForToken(env: Env, token: string): Promise<{
     let nextPageToken: string | undefined;
     let pageNum = 0;
     const pageSize = 100;
-    const maxPages = 10; // Limit to 1000 sources max
 
     // Fetch all pages
     do {
@@ -62,9 +64,9 @@ export async function refreshSourcesForToken(env: Env, token: string): Promise<{
 
       nextPageToken = data.nextPageToken;
 
-      // Safety limit: max 10 pages (1000 sources)
+      // Safety limit to avoid excessive API calls
       if (pageNum >= maxPages) {
-        console.log('[refreshSourcesCache] Reached page limit (10)');
+        console.log(`[refreshSourcesCache] Reached page limit (${maxPages})`);
         break;
       }
     } while (nextPageToken);
