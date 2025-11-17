@@ -123,8 +123,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
       const julesClient = createJulesClient(token);
       console.log('[DEBUG] JulesClient created, calling listSources...');
 
-      // Use 9s timeout to get as many sources as possible
-      // This should fetch 1-2 pages (100-200 sources) before timeout
+      // Use 9s timeout to get first batch quickly
       const result = await julesClient.listSources(9000);
 
       if (result.sources.length === 0) {
@@ -139,10 +138,19 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
       }));
       hasMore = result.hasMore;
 
-      // Cache the results for 1 hour
+      // Cache the initial results for 1 hour
       await setSourcesCache(ctx.env, token, sources);
 
       console.log(`[DEBUG] Cached ${sources.length} sources (hasMore: ${hasMore})`);
+
+      // If there are more sources, start background fetch to get them all
+      if (hasMore) {
+        console.log('[DEBUG] More sources available, will fetch in background...');
+        // Don't await - let it run in background
+        fetchAllSourcesInBackground(ctx.env, token).catch(error => {
+          console.error('[DEBUG] Background fetch error:', error);
+        });
+      }
     }
 
     // Show first page (10 sources per page)
@@ -154,6 +162,74 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
       '❌ Failed to fetch sources from Jules.\n\n' +
       'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
     );
+  }
+}
+
+/**
+ * Fetch all sources in background without timeout limit
+ * Updates cache progressively as pages are fetched
+ */
+async function fetchAllSourcesInBackground(env: any, token: string): Promise<void> {
+  console.log('[fetchAllSourcesInBackground] Starting full fetch...');
+  const startTime = Date.now();
+
+  try {
+    const julesClient = createJulesClient(token);
+    const allSources: any[] = [];
+    let nextPageToken: string | undefined;
+    let pageNum = 0;
+    const pageSize = 100;
+
+    do {
+      pageNum++;
+      const url = nextPageToken
+        ? `/sources?pageSize=${pageSize}&pageToken=${encodeURIComponent(nextPageToken)}`
+        : `/sources?pageSize=${pageSize}`;
+
+      console.log(`[fetchAllSourcesInBackground] Fetching page ${pageNum}...`);
+
+      const response = await fetch(`https://jules.googleapis.com/v1alpha${url}`, {
+        headers: {
+          'X-Goog-Api-Key': token,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`[fetchAllSourcesInBackground] API error: ${response.status}`);
+        break;
+      }
+
+      const data: any = await response.json();
+
+      if (data.sources && data.sources.length > 0) {
+        const mapped = data.sources.map((s: any) => ({
+          name: s.name,
+          displayName: s.displayName,
+          description: s.description,
+        }));
+        allSources.push(...mapped);
+
+        console.log(`[fetchAllSourcesInBackground] Page ${pageNum}: +${data.sources.length} sources (total: ${allSources.length})`);
+
+        // Update cache after each page
+        const { setSourcesCache } = await import('../../kv/storage');
+        await setSourcesCache(env, token, allSources);
+      }
+
+      nextPageToken = data.nextPageToken;
+
+      // Safety limit: max 10 pages (1000 sources)
+      if (pageNum >= 10) {
+        console.log('[fetchAllSourcesInBackground] Reached page limit (10)');
+        break;
+      }
+    } while (nextPageToken);
+
+    const duration = Date.now() - startTime;
+    console.log(`[fetchAllSourcesInBackground] Complete: ${allSources.length} sources in ${duration}ms (${pageNum} pages)`);
+  } catch (error) {
+    console.error('[fetchAllSourcesInBackground] Error:', error);
   }
 }
 

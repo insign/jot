@@ -403,7 +403,7 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
   let message = `<b>📚 Available Sources (${sources.length}${hasMore ? '+' : ''} total)</b>\n\n`;
   message += `<i>Page ${page + 1} of ${totalPages}</i>\n\n`;
   if (hasMore) {
-    message += `<i>⚠️ Showing first ${sources.length} sources (timeout limit reached)</i>\n\n`;
+    message += `<i>⏳ Loading more sources in background... Use /list_sources again in a few seconds to see all.</i>\n\n`;
   }
   message += `<i>Tap a source to select it as default</i>\n\n`;
 
