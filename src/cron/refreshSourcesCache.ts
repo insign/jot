@@ -10,64 +10,124 @@ import { setSourcesCache } from '../kv/storage';
 
 /**
  * Fetch all sources for a token and update cache
- * Takes longer but gets complete list
+ * Takes longer but gets complete list (up to 1000 sources = 10 pages)
  */
-async function refreshSourcesForToken(env: Env, token: string): Promise<number> {
-  console.log('[refreshSourcesCache] Fetching sources for token...');
+export async function refreshSourcesForToken(env: Env, token: string): Promise<{ count: number; hasMore: boolean }> {
+  console.log('[refreshSourcesCache] Starting full sources fetch...');
   const startTime = Date.now();
 
   try {
     const julesClient = createJulesClient(token);
+    const allSources: any[] = [];
+    let nextPageToken: string | undefined;
+    let pageNum = 0;
+    const pageSize = 100;
+    const maxPages = 10; // Limit to 1000 sources max
 
-    // Use extended timeout for cron job (we have more time)
-    // Fetch with 9s timeout to get as many as possible
-    const result = await julesClient.listSources(9000);
+    // Fetch all pages
+    do {
+      pageNum++;
+      let url = `/sources?pageSize=${pageSize}`;
+      if (nextPageToken) {
+        url += `&pageToken=${encodeURIComponent(nextPageToken)}`;
+      }
 
-    if (result.sources.length === 0) {
-      console.log('[refreshSourcesCache] No sources found');
-      return 0;
-    }
+      console.log(`[refreshSourcesCache] Fetching page ${pageNum}...`);
 
-    // Map to cache format
-    const sources = result.sources.map(s => ({
-      name: s.name,
-      displayName: s.displayName,
-      description: s.description,
-    }));
+      // Direct API call without timeout since we have more time in cron/manual refresh
+      const response = await fetch(`https://jules.googleapis.com/v1alpha${url}`, {
+        headers: {
+          'X-Goog-Api-Key': token,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`[refreshSourcesCache] API error: ${response.status}`);
+        break;
+      }
+
+      const data: any = await response.json();
+
+      if (data.sources && data.sources.length > 0) {
+        const mapped = data.sources.map((s: any) => ({
+          name: s.name,
+          displayName: s.displayName,
+          description: s.description,
+        }));
+        allSources.push(...mapped);
+
+        console.log(`[refreshSourcesCache] Page ${pageNum}: +${data.sources.length} sources (total: ${allSources.length})`);
+      }
+
+      nextPageToken = data.nextPageToken;
+
+      // Safety limit: max 10 pages (1000 sources)
+      if (pageNum >= maxPages) {
+        console.log('[refreshSourcesCache] Reached page limit (10)');
+        break;
+      }
+    } while (nextPageToken);
 
     // Update cache (1 hour TTL)
-    await setSourcesCache(env, token, sources);
+    if (allSources.length > 0) {
+      await setSourcesCache(env, token, allSources);
+    }
 
     const duration = Date.now() - startTime;
-    console.log(`[refreshSourcesCache] Cached ${sources.length} sources in ${duration}ms (hasMore: ${result.hasMore})`);
+    const hasMore = !!nextPageToken;
+    console.log(`[refreshSourcesCache] Complete: ${allSources.length} sources in ${duration}ms (${pageNum} pages, hasMore: ${hasMore})`);
 
-    return sources.length;
+    return { count: allSources.length, hasMore };
   } catch (error) {
     console.error('[refreshSourcesCache] Error fetching sources:', error);
-    return 0;
+    return { count: 0, hasMore: false };
   }
 }
 
 /**
  * Main cron handler
- * Refreshes sources cache for all groups that have tokens
+ * Refreshes sources cache for all active tokens (tokens used in last 2 hours)
  */
 export async function refreshSourcesCache(env: Env): Promise<void> {
-  console.log('[refreshSourcesCache] Starting sources cache refresh...');
+  console.log('[refreshSourcesCache] Starting sources cache refresh cron...');
   const startTime = Date.now();
 
   try {
-    // Get all unique tokens from KV
-    // Note: In a production system, you'd want to keep a registry of active tokens
-    // For now, this will only refresh when groups actively use the bot
+    // Get all active tokens from registry
+    const { getActiveTokens } = await import('../kv/storage');
+    const tokens = await getActiveTokens(env);
 
-    // Since we don't have a token registry, this cron will be triggered
-    // whenever /list_sources or /search_sources is used, and will refresh
-    // the cache in the background
+    if (tokens.length === 0) {
+      console.log('[refreshSourcesCache] No active tokens to refresh');
+      return;
+    }
+
+    console.log(`[refreshSourcesCache] Found ${tokens.length} active tokens to refresh`);
+
+    // Refresh each token's sources cache
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const token of tokens) {
+      try {
+        const result = await refreshSourcesForToken(env, token);
+        if (result.count > 0) {
+          successCount++;
+          console.log(`[refreshSourcesCache] ✓ Refreshed token: ${result.count} sources`);
+        } else {
+          errorCount++;
+          console.log(`[refreshSourcesCache] ✗ Failed to refresh token`);
+        }
+      } catch (error) {
+        errorCount++;
+        console.error(`[refreshSourcesCache] ✗ Error refreshing token:`, error);
+      }
+    }
 
     const duration = Date.now() - startTime;
-    console.log(`[refreshSourcesCache] Cache refresh complete in ${duration}ms`);
+    console.log(`[refreshSourcesCache] Complete: ${successCount} success, ${errorCount} errors in ${duration}ms`);
   } catch (error) {
-    console.error('[refreshSourcesCache] Error in cache refresh:', error);
+    console.error('[refreshSourcesCache] Error in cache refresh cron:', error);
   }
 }

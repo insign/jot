@@ -267,6 +267,53 @@ export async function clearSourcesCache(env: Env, token: string): Promise<void> 
   await env.KV.delete(key);
 }
 
+/**
+ * Register a token as active (for cron refresh)
+ * Stores the token in a registry so the cron job can refresh all active tokens
+ */
+export async function registerActiveToken(env: Env, token: string): Promise<void> {
+  const key = `registry:active_tokens`;
+
+  // Get current registry
+  const registryJson = await env.KV.get(key);
+  let registry: string[] = registryJson ? JSON.parse(registryJson) : [];
+
+  // Add token if not already present
+  const tokenHash = hashToken(token);
+  if (!registry.includes(tokenHash)) {
+    registry.push(tokenHash);
+  }
+
+  // Store back with 2 hour expiration (longer than cache)
+  await env.KV.put(key, JSON.stringify(registry), { expirationTtl: 7200 });
+
+  // Also store the actual token (hashed as key) for lookup
+  await env.KV.put(`registry:token:${tokenHash}`, token, { expirationTtl: 7200 });
+}
+
+/**
+ * Get all active tokens for cron refresh
+ */
+export async function getActiveTokens(env: Env): Promise<string[]> {
+  const key = `registry:active_tokens`;
+  const registryJson = await env.KV.get(key);
+
+  if (!registryJson) return [];
+
+  const registry: string[] = JSON.parse(registryJson);
+  const tokens: string[] = [];
+
+  // Lookup each token from the registry
+  for (const tokenHash of registry) {
+    const token = await env.KV.get(`registry:token:${tokenHash}`);
+    if (token) {
+      tokens.push(token);
+    }
+  }
+
+  return tokens;
+}
+
 // Simple hash function for token (for cache key)
 function hashToken(token: string): string {
   let hash = 0;

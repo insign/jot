@@ -32,6 +32,7 @@ import {
   handleGetSource,
   handleListSources,
   handleSearchSources,
+  handleRefreshSources,
   handleListSessions,
   handleSessionInfo,
   handleListActivities,
@@ -53,6 +54,7 @@ import { handleCallbackQuery } from './bot/handlers/callbackHandlers';
 // Import cron handlers
 import { pollActivities } from './cron/pollActivities';
 import { syncSessions } from './cron/syncSessions';
+import { refreshSourcesCache } from './cron/refreshSourcesCache';
 
 /**
  * Setup bot with all command and message handlers
@@ -74,6 +76,7 @@ function setupBot(bot: ReturnType<typeof createBot>): void {
   bot.command('get_source', handleGetSource);
   bot.command('list_sources', handleListSources);
   bot.command('search_sources', handleSearchSources);
+  bot.command('refresh_sources', handleRefreshSources);
   bot.command('list_sessions', handleListSessions);
   bot.command('session_info', handleSessionInfo);
   bot.command('list_activities', handleListActivities);
@@ -160,6 +163,10 @@ export default {
         // Run session sync every 15 minutes
         console.log('[CRON] Running session sync...');
         await syncSessions(env);
+
+        // Run sources cache refresh every 15 minutes
+        console.log('[CRON] Running sources cache refresh...');
+        await refreshSourcesCache(env);
       }
 
       // Run activity polling every minute

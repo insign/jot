@@ -114,7 +114,7 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 
   try {
     // Try to get from cache first
-    const { getSourcesCache, setSourcesCache } = await import('../../kv/storage');
+    const { getSourcesCache, setSourcesCache, registerActiveToken } = await import('../../kv/storage');
     let sources = await getSourcesCache(ctx.env, token);
     let hasMore = false;
 
@@ -141,16 +141,10 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
       // Cache the initial results for 1 hour
       await setSourcesCache(ctx.env, token, sources);
 
-      console.log(`[DEBUG] Cached ${sources.length} sources (hasMore: ${hasMore})`);
+      // Register token as active for cron refresh
+      await registerActiveToken(ctx.env, token);
 
-      // If there are more sources, start background fetch to get them all
-      if (hasMore) {
-        console.log('[DEBUG] More sources available, will fetch in background...');
-        // Don't await - let it run in background
-        fetchAllSourcesInBackground(ctx.env, token).catch(error => {
-          console.error('[DEBUG] Background fetch error:', error);
-        });
-      }
+      console.log(`[DEBUG] Cached ${sources.length} sources (hasMore: ${hasMore})`);
     }
 
     // Show first page (10 sources per page)
@@ -166,70 +160,57 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 }
 
 /**
- * Fetch all sources in background without timeout limit
- * Updates cache progressively as pages are fetched
+ * /refresh_sources command
+ * Manually refresh the sources cache to fetch all available sources
  */
-async function fetchAllSourcesInBackground(env: any, token: string): Promise<void> {
-  console.log('[fetchAllSourcesInBackground] Starting full fetch...');
-  const startTime = Date.now();
+export async function handleRefreshSources(ctx: BotContext): Promise<void> {
+  const groupId = getGroupId(ctx);
+
+  if (!groupId) {
+    await ctx.reply('This command only works in group chats.');
+    return;
+  }
+
+  const token = await getJulesToken(ctx.env, groupId);
+
+  if (!token) {
+    await ctx.reply(
+      '⚠️ Jules token not configured.\n\n' +
+      'Use /set_jules_token &lt;token&gt; to get started.',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  await ctx.reply('🔄 Refreshing sources cache... This may take a minute.');
 
   try {
-    const julesClient = createJulesClient(token);
-    const allSources: any[] = [];
-    let nextPageToken: string | undefined;
-    let pageNum = 0;
-    const pageSize = 100;
+    // Register token as active for cron refresh
+    const { registerActiveToken } = await import('../../kv/storage');
+    await registerActiveToken(ctx.env, token);
 
-    do {
-      pageNum++;
-      const url = nextPageToken
-        ? `/sources?pageSize=${pageSize}&pageToken=${encodeURIComponent(nextPageToken)}`
-        : `/sources?pageSize=${pageSize}`;
+    // Import and use the refresh function
+    const { refreshSourcesForToken } = await import('../../cron/refreshSourcesCache');
+    const result = await refreshSourcesForToken(ctx.env, token);
 
-      console.log(`[fetchAllSourcesInBackground] Fetching page ${pageNum}...`);
+    if (result.count === 0) {
+      await ctx.reply('❌ Failed to refresh sources. Please try again later.');
+      return;
+    }
 
-      const response = await fetch(`https://jules.googleapis.com/v1alpha${url}`, {
-        headers: {
-          'X-Goog-Api-Key': token,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        console.error(`[fetchAllSourcesInBackground] API error: ${response.status}`);
-        break;
-      }
-
-      const data: any = await response.json();
-
-      if (data.sources && data.sources.length > 0) {
-        const mapped = data.sources.map((s: any) => ({
-          name: s.name,
-          displayName: s.displayName,
-          description: s.description,
-        }));
-        allSources.push(...mapped);
-
-        console.log(`[fetchAllSourcesInBackground] Page ${pageNum}: +${data.sources.length} sources (total: ${allSources.length})`);
-
-        // Update cache after each page
-        const { setSourcesCache } = await import('../../kv/storage');
-        await setSourcesCache(env, token, allSources);
-      }
-
-      nextPageToken = data.nextPageToken;
-
-      // Safety limit: max 10 pages (1000 sources)
-      if (pageNum >= 10) {
-        console.log('[fetchAllSourcesInBackground] Reached page limit (10)');
-        break;
-      }
-    } while (nextPageToken);
-
-    const duration = Date.now() - startTime;
-    console.log(`[fetchAllSourcesInBackground] Complete: ${allSources.length} sources in ${duration}ms (${pageNum} pages)`);
+    await ctx.reply(
+      `✅ <b>Sources cache refreshed!</b>\n\n` +
+      `📦 Found <b>${result.count}</b> sources${result.hasMore ? '+' : ''}\n` +
+      `${result.hasMore ? '⚠️ Note: Limited to 1000 sources max\n\n' : '\n'}` +
+      `Use /list_sources or /search_sources to browse.`,
+      { parse_mode: 'HTML' }
+    );
   } catch (error) {
-    console.error('[fetchAllSourcesInBackground] Error:', error);
+    console.error('Error refreshing sources:', error);
+    await ctx.reply(
+      '❌ Failed to refresh sources.\n\n' +
+      'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
+    );
   }
 }
 
