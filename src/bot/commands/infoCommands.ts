@@ -153,6 +153,104 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 }
 
 /**
+ * /search_sources command
+ * Search sources by owner/repo name
+ */
+export async function handleSearchSources(ctx: BotContext): Promise<void> {
+  const groupId = getGroupId(ctx);
+
+  if (!groupId) {
+    await ctx.reply('This command only works in group chats.');
+    return;
+  }
+
+  // Get search query from command arguments
+  const text = ctx.message?.text || '';
+  const query = text.replace(/^\/search_sources(@\w+)?\s*/, '').trim();
+
+  if (!query) {
+    await ctx.reply(
+      '🔍 <b>Search Sources</b>\n\n' +
+      'Usage: <code>/search_sources query</code>\n\n' +
+      'Examples:\n' +
+      '• <code>/search_sources myproject</code>\n' +
+      '• <code>/search_sources owner/repo</code>\n' +
+      '• <code>/search_sources org-name</code>',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  const token = await getJulesToken(ctx.env, groupId);
+
+  if (!token) {
+    await ctx.reply(
+      '⚠️ Jules token not configured.\n\n' +
+      'Use /set_jules_token &lt;token&gt; to get started.',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  await ctx.reply(`🔍 Searching for "<code>${escapeHtml(query)}</code>"...`, { parse_mode: 'HTML' });
+
+  try {
+    // Try to get from cache first
+    const { getSourcesCache } = await import('../../kv/storage');
+    let sources = await getSourcesCache(ctx.env, token);
+
+    // If not in cache, fetch from API
+    if (!sources) {
+      const julesClient = createJulesClient(token);
+      const result = await julesClient.listSources();
+
+      if (result.sources.length === 0) {
+        await ctx.reply('No sources found. Please connect a repository at https://jules.google');
+        return;
+      }
+
+      sources = result.sources.map(s => ({
+        name: s.name,
+        displayName: s.displayName,
+        description: s.description,
+      }));
+
+      // Cache for future searches
+      const { setSourcesCache } = await import('../../kv/storage');
+      await setSourcesCache(ctx.env, token, sources);
+    }
+
+    // Filter sources by query (case-insensitive search in name)
+    const queryLower = query.toLowerCase();
+    const filteredSources = sources.filter(s => {
+      const nameLower = s.name.toLowerCase();
+      const displayNameLower = (s.displayName || '').toLowerCase();
+
+      return nameLower.includes(queryLower) || displayNameLower.includes(queryLower);
+    });
+
+    if (filteredSources.length === 0) {
+      await ctx.reply(
+        `❌ No sources found matching "<code>${escapeHtml(query)}</code>"\n\n` +
+        'Try a different search term or use /list_sources to see all repositories.',
+        { parse_mode: 'HTML' }
+      );
+      return;
+    }
+
+    // Show results (first page)
+    const { showSourcesPage } = await import('../handlers/callbackHandlers');
+    await showSourcesPage(ctx, filteredSources, 0, false);
+  } catch (error) {
+    console.error('Error searching sources:', error);
+    await ctx.reply(
+      '❌ Failed to search sources.\n\n' +
+      'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
+    );
+  }
+}
+
+/**
  * /list_sessions command
  * List all active sessions for the group
  */

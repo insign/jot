@@ -31,6 +31,7 @@ import {
   handleStatus,
   handleGetSource,
   handleListSources,
+  handleSearchSources,
   handleListSessions,
   handleSessionInfo,
   handleListActivities,
@@ -72,6 +73,7 @@ function setupBot(bot: ReturnType<typeof createBot>): void {
   bot.command('status', handleStatus);
   bot.command('get_source', handleGetSource);
   bot.command('list_sources', handleListSources);
+  bot.command('search_sources', handleSearchSources);
   bot.command('list_sessions', handleListSessions);
   bot.command('session_info', handleSessionInfo);
   bot.command('list_activities', handleListActivities);

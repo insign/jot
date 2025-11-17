@@ -414,8 +414,19 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
   // Add buttons for each source (1 per line)
   pageSources.forEach((source, index) => {
     const num = start + index + 1;
-    const name = source.displayName || source.name.split('/').pop();
-    const displayName = `${num}. ${name}`;
+
+    // Extract owner/repo from source name (format: sources/github/owner/repo)
+    let displayText = source.displayName || source.name;
+    if (source.name.includes('sources/github/')) {
+      const parts = source.name.split('/');
+      if (parts.length >= 4) {
+        const owner = parts[2];
+        const repo = parts[3];
+        displayText = `${owner}/${repo}`;
+      }
+    }
+
+    const displayName = `${num}. ${displayText}`;
 
     // Use page:index for callback data (shorter, precise)
     keyboard.text(`📦 ${displayName}`, `select_source:${page}:${index}`);

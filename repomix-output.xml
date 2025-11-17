@@ -1695,6 +1695,7 @@ import {
   handleStatus,
   handleGetSource,
   handleListSources,
+  handleSearchSources,
   handleListSessions,
   handleSessionInfo,
   handleListActivities,
@@ -1736,6 +1737,7 @@ function setupBot(bot: ReturnType<typeof createBot>): void {
   bot.command('status', handleStatus);
   bot.command('get_source', handleGetSource);
   bot.command('list_sources', handleListSources);
+  bot.command('search_sources', handleSearchSources);
   bot.command('list_sessions', handleListSessions);
   bot.command('session_info', handleSessionInfo);
   bot.command('list_activities', handleListActivities);
@@ -6278,23 +6280,25 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
     // Try to get from cache first
     const { getSourcesCache, setSourcesCache } = await import('../../kv/storage');
     let sources = await getSourcesCache(ctx.env, token);
+    let hasMore = false;
 
     // If not in cache, fetch from API
     if (!sources) {
       const julesClient = createJulesClient(token);
       console.log('[DEBUG] JulesClient created, calling listSources...');
-      const rawSources = await julesClient.listSources();
+      const result = await julesClient.listSources();
 
-      if (rawSources.length === 0) {
+      if (result.sources.length === 0) {
         await ctx.reply('No sources found. Please connect a repository at https://jules.google');
         return;
       }
 
-      sources = rawSources.map(s => ({
+      sources = result.sources.map(s => ({
         name: s.name,
         displayName: s.displayName,
         description: s.description,
       }));
+      hasMore = result.hasMore;
 
       // Cache the results for 1 hour
       await setSourcesCache(ctx.env, token, sources);
@@ -6302,11 +6306,109 @@ export async function handleListSources(ctx: BotContext): Promise<void> {
 
     // Show first page (10 sources per page)
     const { showSourcesPage } = await import('../handlers/callbackHandlers');
-    await showSourcesPage(ctx, sources, 0);
+    await showSourcesPage(ctx, sources, 0, hasMore);
   } catch (error) {
     console.error('Error fetching sources:', error);
     await ctx.reply(
       '❌ Failed to fetch sources from Jules.\n\n' +
+      'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
+    );
+  }
+}
+
+/**
+ * /search_sources command
+ * Search sources by owner/repo name
+ */
+export async function handleSearchSources(ctx: BotContext): Promise<void> {
+  const groupId = getGroupId(ctx);
+
+  if (!groupId) {
+    await ctx.reply('This command only works in group chats.');
+    return;
+  }
+
+  // Get search query from command arguments
+  const text = ctx.message?.text || '';
+  const query = text.replace(/^\/search_sources(@\w+)?\s*/, '').trim();
+
+  if (!query) {
+    await ctx.reply(
+      '🔍 <b>Search Sources</b>\n\n' +
+      'Usage: <code>/search_sources query</code>\n\n' +
+      'Examples:\n' +
+      '• <code>/search_sources myproject</code>\n' +
+      '• <code>/search_sources owner/repo</code>\n' +
+      '• <code>/search_sources org-name</code>',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  const token = await getJulesToken(ctx.env, groupId);
+
+  if (!token) {
+    await ctx.reply(
+      '⚠️ Jules token not configured.\n\n' +
+      'Use /set_jules_token &lt;token&gt; to get started.',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  await ctx.reply(`🔍 Searching for "<code>${escapeHtml(query)}</code>"...`, { parse_mode: 'HTML' });
+
+  try {
+    // Try to get from cache first
+    const { getSourcesCache } = await import('../../kv/storage');
+    let sources = await getSourcesCache(ctx.env, token);
+
+    // If not in cache, fetch from API
+    if (!sources) {
+      const julesClient = createJulesClient(token);
+      const result = await julesClient.listSources();
+
+      if (result.sources.length === 0) {
+        await ctx.reply('No sources found. Please connect a repository at https://jules.google');
+        return;
+      }
+
+      sources = result.sources.map(s => ({
+        name: s.name,
+        displayName: s.displayName,
+        description: s.description,
+      }));
+
+      // Cache for future searches
+      const { setSourcesCache } = await import('../../kv/storage');
+      await setSourcesCache(ctx.env, token, sources);
+    }
+
+    // Filter sources by query (case-insensitive search in name)
+    const queryLower = query.toLowerCase();
+    const filteredSources = sources.filter(s => {
+      const nameLower = s.name.toLowerCase();
+      const displayNameLower = (s.displayName || '').toLowerCase();
+
+      return nameLower.includes(queryLower) || displayNameLower.includes(queryLower);
+    });
+
+    if (filteredSources.length === 0) {
+      await ctx.reply(
+        `❌ No sources found matching "<code>${escapeHtml(query)}</code>"\n\n` +
+        'Try a different search term or use /list_sources to see all repositories.',
+        { parse_mode: 'HTML' }
+      );
+      return;
+    }
+
+    // Show results (first page)
+    const { showSourcesPage } = await import('../handlers/callbackHandlers');
+    await showSourcesPage(ctx, filteredSources, 0, false);
+  } catch (error) {
+    console.error('Error searching sources:', error);
+    await ctx.reply(
+      '❌ Failed to search sources.\n\n' +
       'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
     );
   }
@@ -7383,6 +7485,46 @@ Built with:
 Made with ❤️ for developers who want to bring Jules to Telegram
 </file>
 
+<file path="package.json">
+{
+  "name": "jules-over-telegram",
+  "version": "0.1.0",
+  "description": "Telegram interface for Jules using Grammy and Cloudflare Workers",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "cf-typegen": "wrangler types",
+    "wrangler": "wrangler"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "jules",
+    "cloudflare",
+    "workers",
+    "grammy"
+  ],
+  "author": "",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.5",
+    "@cloudflare/workers-types": "^4.20251109.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.45.4"
+  },
+  "dependencies": {
+    "grammy": "^1.38.3"
+  }
+}
+</file>
+
 <file path="src/bot/handlers/callbackHandlers.ts">
 /**
  * Callback query handlers
@@ -7779,15 +7921,18 @@ export async function handleSelectSourceCallback(ctx: BotContext): Promise<void>
  * Show a specific page of sources with pagination keyboard
  * Shared between handleListSources and handleSourcesPageCallback
  */
-export async function showSourcesPage(ctx: BotContext, sources: any[], page: number): Promise<void> {
+export async function showSourcesPage(ctx: BotContext, sources: any[], page: number, hasMore: boolean = false): Promise<void> {
   const PAGE_SIZE = 10;
   const totalPages = Math.ceil(sources.length / PAGE_SIZE);
   const start = page * PAGE_SIZE;
   const end = Math.min(start + PAGE_SIZE, sources.length);
   const pageSources = sources.slice(start, end);
 
-  let message = `<b>📚 Available Sources (${sources.length} total)</b>\n\n`;
+  let message = `<b>📚 Available Sources (${sources.length}${hasMore ? '+' : ''} total)</b>\n\n`;
   message += `<i>Page ${page + 1} of ${totalPages}</i>\n\n`;
+  if (hasMore) {
+    message += `<i>⚠️ Showing first ${sources.length} sources (timeout limit reached)</i>\n\n`;
+  }
   message += `<i>Tap a source to select it as default</i>\n\n`;
 
   // Create pagination keyboard
@@ -7797,8 +7942,19 @@ export async function showSourcesPage(ctx: BotContext, sources: any[], page: num
   // Add buttons for each source (1 per line)
   pageSources.forEach((source, index) => {
     const num = start + index + 1;
-    const name = source.displayName || source.name.split('/').pop();
-    const displayName = `${num}. ${name}`;
+
+    // Extract owner/repo from source name (format: sources/github/owner/repo)
+    let displayText = source.displayName || source.name;
+    if (source.name.includes('sources/github/')) {
+      const parts = source.name.split('/');
+      if (parts.length >= 4) {
+        const owner = parts[2];
+        const repo = parts[3];
+        displayText = `${owner}/${repo}`;
+      }
+    }
+
+    const displayName = `${num}. ${displayText}`;
 
     // Use page:index for callback data (shorter, precise)
     keyboard.text(`📦 ${displayName}`, `select_source:${page}:${index}`);
@@ -7886,46 +8042,6 @@ export async function handleCallbackQuery(ctx: BotContext): Promise<void> {
   } else {
     // Unknown callback
     await ctx.answerCallbackQuery({ text: '⚠️ Unknown action' });
-  }
-}
-</file>
-
-<file path="package.json">
-{
-  "name": "jules-over-telegram",
-  "version": "0.1.0",
-  "description": "Telegram interface for Jules using Grammy and Cloudflare Workers",
-  "main": "src/index.ts",
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "tail": "wrangler tail",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage",
-    "cf-typegen": "wrangler types",
-    "wrangler": "wrangler"
-  },
-  "keywords": [
-    "telegram",
-    "bot",
-    "jules",
-    "cloudflare",
-    "workers",
-    "grammy"
-  ],
-  "author": "",
-  "license": "AGPL-3.0-or-later",
-  "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.5",
-    "@cloudflare/workers-types": "^4.20251109.0",
-    "typescript": "^5.9.3",
-    "vitest": "^3.0.0",
-    "wrangler": "^4.45.4"
-  },
-  "dependencies": {
-    "grammy": "^1.38.3"
   }
 }
 </file>
@@ -8385,15 +8501,110 @@ export class JulesAPI {
   }
 
   /**
-   * List all sources available to the user
+   * List all sources available to the user with timeout protection
    * GET /v1alpha/sources
+   * Fetches sources with a time limit to avoid worker timeouts
+   * @param timeoutMs - Maximum time to spend fetching (default 8000ms)
+   * @param pageSize - Number of sources per page (default 100)
+   * @returns Object with sources array and hasMore indicator
    */
-  async listSources(): Promise<JulesSource[]> {
-    const response = await retryWithBackoff(() =>
-      this.request<{ sources: JulesSource[] }>('/sources')
-    );
+  async listSources(timeoutMs: number = 8000, pageSize: number = 100): Promise<{ sources: JulesSource[]; hasMore: boolean }> {
+    console.log(`[listSources] Starting with ${timeoutMs}ms timeout, pageSize=${pageSize}`);
+    const startTime = Date.now();
 
-    return response.sources || [];
+    // Shared state between fetchSources and timeout
+    const sharedState = {
+      sources: [] as JulesSource[],
+      hasMore: false,
+      stopped: false,
+    };
+
+    const fetchSources = async (): Promise<void> => {
+      let nextPageToken: string | undefined;
+      let pageNum = 0;
+
+      try {
+        do {
+          // Check if we should stop
+          if (sharedState.stopped) {
+            console.log(`[listSources] Fetch stopped by timeout at page ${pageNum}`);
+            break;
+          }
+
+          pageNum++;
+
+          // Build URL with pageSize parameter
+          let url = `/sources?pageSize=${pageSize}`;
+          if (nextPageToken) {
+            url += `&pageToken=${encodeURIComponent(nextPageToken)}`;
+          }
+
+          console.log(`[listSources] Fetching page ${pageNum}...`);
+          const pageStart = Date.now();
+
+          const response = await retryWithBackoff(() =>
+            this.request<{ sources?: JulesSource[]; nextPageToken?: string }>(url),
+            { maxAttempts: 1 } // Single attempt to avoid delays
+          );
+
+          const pageTime = Date.now() - pageStart;
+
+          if (response.sources && response.sources.length > 0) {
+            sharedState.sources.push(...response.sources);
+            console.log(`[listSources] Page ${pageNum} returned ${response.sources.length} sources in ${pageTime}ms (total: ${sharedState.sources.length})`);
+          }
+
+          nextPageToken = response.nextPageToken;
+          sharedState.hasMore = !!nextPageToken;
+          console.log(`[listSources] Page ${pageNum} nextPageToken: ${nextPageToken ? 'exists' : 'null'}`);
+        } while (nextPageToken && !sharedState.stopped);
+
+        if (!sharedState.stopped) {
+          console.log(`[listSources] Fetch complete: ${sharedState.sources.length} total sources in ${Date.now() - startTime}ms`);
+        }
+      } catch (error) {
+        console.error('[listSources] Error in fetchSources:', error);
+        sharedState.hasMore = true; // Assume there might be more
+      }
+    };
+
+    // Start fetching (don't await yet)
+    const fetchPromise = fetchSources();
+
+    // Wait for either completion or timeout
+    await Promise.race([
+      fetchPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          console.log(`[listSources] Timeout triggered after ${timeoutMs}ms`);
+          sharedState.stopped = true;
+          sharedState.hasMore = true;
+          resolve();
+        }, timeoutMs);
+      })
+    ]);
+
+    // If we have no sources at all, try to get at least the first page
+    if (sharedState.sources.length === 0) {
+      console.log('[listSources] No sources collected, attempting first page...');
+      try {
+        const response = await retryWithBackoff(() =>
+          this.request<{ sources?: JulesSource[]; nextPageToken?: string }>(`/sources?pageSize=${pageSize}`),
+          { maxAttempts: 1 }
+        );
+
+        if (response.sources) {
+          sharedState.sources = response.sources;
+          sharedState.hasMore = !!response.nextPageToken;
+          console.log(`[listSources] First page fallback: ${sharedState.sources.length} sources`);
+        }
+      } catch (error) {
+        console.error('[listSources] Error fetching first page:', error);
+      }
+    }
+
+    console.log(`[listSources] Returning ${sharedState.sources.length} sources (hasMore: ${sharedState.hasMore}) in ${Date.now() - startTime}ms`);
+    return { sources: sharedState.sources, hasMore: sharedState.hasMore };
   }
 
   /**
@@ -8598,6 +8809,160 @@ export function isSessionNotFoundError(error: Error): boolean {
 
 <git_diffs>
 <git_diff_work_tree>
+src/bot/commands/infoCommands.ts --- TypeScript
+152 152   }
+153 153 }
+... 154 
+... 155 /**
+... 156  * /search_sources command
+... 157  * Search sources by owner/repo name
+... 158  */
+... 159 export async function handleSearchSources(ctx: BotContext): Promise<void> {
+... 160   const groupId = getGroupId(ctx);
+... 161 
+... 162   if (!groupId) {
+... 163     await ctx.reply('This command only works in group chats.');
+... 164     return;
+... 165   }
+... 166 
+... 167   // Get search query from command arguments
+... 168   const text = ctx.message?.text || '';
+... 169   const query = text.replace(/^\/search_sources(@\w+)?\s*/, '').trim();
+... 170 
+... 171   if (!query) {
+... 172     await ctx.reply(
+... 173       '🔍 <b>Search Sources</b>\n\n' +
+... 174       'Usage: <code>/search_sources query</code>\n\n' +
+... 175       'Examples:\n' +
+... 176       '• <code>/search_sources myproject</code>\n' +
+... 177       '• <code>/search_sources owner/repo</code>\n' +
+... 178       '• <code>/search_sources org-name</code>',
+... 179       { parse_mode: 'HTML' }
+... 180     );
+... 181     return;
+... 182   }
+... 183 
+... 184   const token = await getJulesToken(ctx.env, groupId);
+... 185 
+... 186   if (!token) {
+... 187     await ctx.reply(
+... 188       '⚠️ Jules token not configured.\n\n' +
+... 189       'Use /set_jules_token &lt;token&gt; to get started.',
+... 190       { parse_mode: 'HTML' }
+... 191     );
+... 192     return;
+... 193   }
+... 194 
+... 195   await ctx.reply(`🔍 Searching for "<code>${escapeHtml(query)}</code>"...`, { parse_mode: 'HTML' });
+... 196 
+... 197   try {
+... 198     // Try to get from cache first
+... 199     const { getSourcesCache } = await import('../../kv/storage');
+... 200     let sources = await getSourcesCache(ctx.env, token);
+... 201 
+... 202     // If not in cache, fetch from API
+... 203     if (!sources) {
+... 204       const julesClient = createJulesClient(token);
+... 205       const result = await julesClient.listSources();
+... 206 
+... 207       if (result.sources.length === 0) {
+... 208         await ctx.reply('No sources found. Please connect a repository at https://jules.google');
+... 209         return;
+... 210       }
+... 211 
+... 212       sources = result.sources.map(s => ({
+... 213         name: s.name,
+... 214         displayName: s.displayName,
+... 215         description: s.description,
+... 216       }));
+... 217 
+... 218       // Cache for future searches
+... 219       const { setSourcesCache } = await import('../../kv/storage');
+... 220       await setSourcesCache(ctx.env, token, sources);
+... 221     }
+... 222 
+... 223     // Filter sources by query (case-insensitive search in name)
+... 224     const queryLower = query.toLowerCase();
+... 225     const filteredSources = sources.filter(s => {
+... 226       const nameLower = s.name.toLowerCase();
+... 227       const displayNameLower = (s.displayName || '').toLowerCase();
+... 228 
+... 229       return nameLower.includes(queryLower) || displayNameLower.includes(queryLower);
+... 230     });
+... 231 
+... 232     if (filteredSources.length === 0) {
+... 233       await ctx.reply(
+... 234         `❌ No sources found matching "<code>${escapeHtml(query)}</code>"\n\n` +
+... 235         'Try a different search term or use /list_sources to see all repositories.',
+... 236         { parse_mode: 'HTML' }
+... 237       );
+... 238       return;
+... 239     }
+... 240 
+... 241     // Show results (first page)
+... 242     const { showSourcesPage } = await import('../handlers/callbackHandlers');
+... 243     await showSourcesPage(ctx, filteredSources, 0, false);
+... 244   } catch (error) {
+... 245     console.error('Error searching sources:', error);
+... 246     await ctx.reply(
+... 247       '❌ Failed to search sources.\n\n' +
+... 248       'Error: ' + (error instanceof Error ? error.message : 'Unknown error')
+... 249     );
+... 250   }
+... 251 }
+154 252 
+155 253 /**
+156 254  * /list_sessions command
+
+src/bot/handlers/callbackHandlers.ts --- TypeScript
+415   pageSources.forEach((source, inde 415   pageSources.forEach((source, inde
+... x) => {                             ... x) => {
+416     const num = start + index + 1;  416     const num = start + index + 1;
+...                                     417 
+...                                     418     // Extract owner/repo from sour
+...                                     ... ce name (format: sources/github/own
+...                                     ... er/repo)
+...                                     419     let displayText = source.displa
+...                                     ... yName || source.name;
+...                                     420     if (source.name.includes('sourc
+...                                     ... es/github/')) {
+417     const name = source.displayName 421       const parts = source.name.spl
+...  || source.name.split('/').pop();   ... it('/');
+...                                     422       if (parts.length >= 4) {
+...                                     423         const owner = parts[2];
+...                                     424         const repo = parts[3];
+...                                     425         displayText = `${owner}/${r
+...                                     ... epo}`;
+...                                     426       }
+...                                     427     }
+...                                     428 
+418     const displayName = `${num}. ${ 429     const displayName = `${num}. ${
+... name}`;                             ... displayText}`;
+419                                     430 
+420     // Use page:index for callback  431     // Use page:index for callback 
+... data (shorter, precise)             ... data (shorter, precise)
+421     keyboard.text(`📦 ${displayName 432     keyboard.text(`📦 ${displayName
+    }`, `select_source:${page}:${index}     }`, `select_source:${page}:${index}
+    `);                                     `);
+
+src/index.ts --- 1/2 --- TypeScript
+31 31   handleStatus,
+32 32   handleGetSource,
+33 33   handleListSources,
+.. 34   handleSearchSources,
+34 35   handleListSessions,
+35 36   handleSessionInfo,
+36 37   handleListActivities,
+
+src/index.ts --- 2/2 --- TypeScript
+72 73   bot.command('status', handleStatus);
+73 74   bot.command('get_source', handleGetSource);
+74 75   bot.command('list_sources', handleListSources);
+.. 76   bot.command('search_sources', handleSearchSources);
+75 77   bot.command('list_sessions', handleListSessions);
+76 78   bot.command('session_info', handleSessionInfo);
+77 79   bot.command('list_activities', handleListActivities);
+
 
 </git_diff_work_tree>
 <git_diff_staged>
@@ -8606,6 +8971,16 @@ export function isSessionNotFoundError(error: Error): boolean {
 </git_diffs>
 
 <git_logs>
+<git_log_commit>
+<date>2025-11-17 03:28:23 -0300</date>
+<message>feat: Fix sources pagination with timeout protection and pageSize optimization</message>
+<files>
+repomix-output.xml
+src/bot/commands/infoCommands.ts
+src/bot/handlers/callbackHandlers.ts
+src/jules/api.ts
+</files>
+</git_log_commit>
 <git_log_commit>
 <date>2025-11-17 02:27:10 -0300</date>
 <message>add tail</message>
@@ -8988,14 +9363,6 @@ wrangler.toml
 <message>ci(deps): Bump softprops/action-gh-release from 1 to 2</message>
 <files>
 .github/workflows/release.yml
-</files>
-</git_log_commit>
-<git_log_commit>
-<date>2025-11-03 22:39:11 +0000</date>
-<message>chore(deps-dev)(deps-dev): Bump vitest from 2.1.9 to 4.0.6</message>
-<files>
-package-lock.json
-package.json
 </files>
 </git_log_commit>
 </git_logs>
