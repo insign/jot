@@ -90,9 +90,10 @@ describe('Jules API', () => {
       );
 
       const client = createJulesClient('test-key');
-      const sources = await client.listSources();
+      const result = await client.listSources();
 
-      expect(sources).toHaveLength(2);
+      expect(result.sources).toHaveLength(2);
+      expect(result.hasMore).toBe(false);
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
@@ -105,9 +106,10 @@ describe('Jules API', () => {
       );
 
       const client = createJulesClient('test-key');
-      const sources = await client.listSources();
+      const result = await client.listSources();
 
-      expect(sources).toEqual([]);
+      expect(result.sources).toEqual([]);
+      expect(result.hasMore).toBe(false);
     });
   });
 

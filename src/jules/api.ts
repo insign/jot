@@ -76,6 +76,7 @@ export class JulesAPI {
       sources: [] as JulesSource[],
       hasMore: false,
       stopped: false,
+      criticalError: null as Error | null,
     };
 
     const fetchSources = async (): Promise<void> => {
@@ -123,7 +124,11 @@ export class JulesAPI {
         }
       } catch (error) {
         console.error('[listSources] Error in fetchSources:', error);
-        sharedState.hasMore = true; // Assume there might be more
+        // Re-throw critical errors (auth, rate limiting, etc.)
+        if (error instanceof Error && error.message.includes('Jules API error')) {
+          sharedState.criticalError = error;
+        }
+        sharedState.hasMore = true; // Assume there might be more for non-critical errors
       }
     };
 
@@ -143,6 +148,11 @@ export class JulesAPI {
       })
     ]);
 
+    // If a critical error occurred, throw it
+    if (sharedState.criticalError) {
+      throw sharedState.criticalError;
+    }
+
     // If we have no sources at all, try to get at least the first page
     if (sharedState.sources.length === 0) {
       console.log('[listSources] No sources collected, attempting first page...');
@@ -159,6 +169,10 @@ export class JulesAPI {
         }
       } catch (error) {
         console.error('[listSources] Error fetching first page:', error);
+        // Re-throw critical errors (auth, rate limiting, etc.)
+        if (error instanceof Error && error.message.includes('Jules API error')) {
+          throw error;
+        }
       }
     }
 
