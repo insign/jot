@@ -25,13 +25,13 @@
   "author": "",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.5",
+    "@cloudflare/vitest-pool-workers": "^0.10.10",
     "@cloudflare/workers-types": "^4.20251109.0",
     "typescript": "^5.9.3",
     "vitest": "^3.0.0",
     "wrangler": "^4.45.4"
   },
   "dependencies": {
-    "grammy": "^1.38.3"
+    "grammy": "^1.38.4"
   }
 }
