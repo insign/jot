@@ -25,7 +25,7 @@
   "author": "",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.14",
+    "@cloudflare/vitest-pool-workers": "^0.10.15",
     "@cloudflare/workers-types": "^4.20251109.0",
     "typescript": "^5.9.3",
     "vitest": "^3.0.0",
