@@ -29,7 +29,7 @@
     "@cloudflare/workers-types": "^4.20260329.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
-    "wrangler": "^4.127.0"
+    "wrangler": "^4.129.0"
   },
   "dependencies": {
     "grammy": "^1.46.0"
